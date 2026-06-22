@@ -65,7 +65,6 @@ const month_iterator = [
   [[11, 0], [10, 0], [9, 0], [8, 0], [7, 0], [6, 0]]
 ]
 
-app.listen(port, () => { console.log("P4P server is live") })
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))
 app.use("/ranking", express.static("ranking"))
@@ -305,4 +304,12 @@ const createStatusSublist = (i) => {
   }
   return object
 }
+
+// On Vercel the exported app is used as the serverless handler.
+// app.listen only runs for local dev (node main.js).
+if (require.main === module) {
+  app.listen(port, () => { console.log("P4P server is live") })
+}
+
+module.exports = app
 
