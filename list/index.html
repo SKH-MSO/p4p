@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="th" data-theme="light">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SAKHONMSO P4P</title>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Work+Sans:wght@300;400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --primary:   #A68966;   /* warm tan — brand / accent */
+      --secondary: #4B3D33;   /* deep brown — text / headers */
+      --tertiary:  #F5F5F0;   /* creamy off-white — surface2 */
+      --neutral:   #FAF9F6;   /* crisp white — body bg / surface */
+      --surface:   #ffffff;
+      --surface2:  #F5F5F0;
+      --border:    #E8E3DC;   /* warm tan-tinted border */
+      --text:      #4B3D33;
+      --muted:     #8A7464;   /* mid-tone brown-gray */
+      --accent:    #A68966;
+      /* roundedness: 1 → subtle 4px base */
+      --r-sm:  4px;
+      --r-md:  6px;
+      --r-lg:  8px;
+      --r-pill:999px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
+      background: var(--neutral);
+      color: var(--text);
+      -webkit-text-size-adjust: 100%;
+    }
+    .mono { font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; }
+
+    /* ── HEADER ── */
+    .app-header {
+      position: sticky; top: 0; z-index: 50;
+      background: var(--secondary);
+      border-bottom: 1px solid rgba(0,0,0,.12);
+    }
+    .header-top {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; height: 52px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-icon {
+      width: 32px; height: 32px; border-radius: var(--r-md);
+      background: var(--primary); color: white;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .brand-icon svg { width: 16px; height: 16px; fill: white; }
+    .brand-name { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 17px; line-height: 1.2; color: #ffffff; }
+    .brand-sub  { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.2; }
+    .header-clock { font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 13px; color: rgba(255,255,255,.45); }
+
+    .header-controls { padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary); }
+
+    /* Custom select */
+    .ctrl-select {
+      width: 100%; height: 40px;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+      border-radius: var(--r-md); padding: 0 32px 0 12px;
+      font-size: 14px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 500;
+      color: #ffffff; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center;
+      outline: none; cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .ctrl-select:focus { border-color: var(--primary); background: rgba(255,255,255,.15); }
+    .ctrl-select option { background: var(--secondary); color: #ffffff; }
+    .ctrl-select option:disabled { color: rgba(255,255,255,.4); }
+
+    /* Custom search */
+    .ctrl-search { position: relative; }
+    .ctrl-search svg {
+      position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+      width: 15px; height: 15px; stroke: rgba(255,255,255,.45); pointer-events: none;
+    }
+    .ctrl-search input {
+      width: 100%; height: 40px;
+      background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+      border-radius: var(--r-md); padding: 0 12px 0 34px;
+      font-size: 14px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
+      color: #ffffff; outline: none;
+      transition: border-color .15s, background .15s;
+    }
+    .ctrl-search input:focus { border-color: var(--primary); background: rgba(255,255,255,.15); }
+    .ctrl-search input:disabled { opacity: .35; cursor: not-allowed; }
+    .ctrl-search input::placeholder { color: rgba(255,255,255,.35); }
+
+    /* ── STATS ── */
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px; padding: 12px 16px 0;
+    }
+    .stats-grid .stat-pill:nth-child(3) { grid-column: 1 / -1; }
+    .stat-pill {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r-lg); padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 2px;
+      animation: fadeUp .3s ease both;
+    }
+    .stat-pill:nth-child(2) { animation-delay: .06s; }
+    .stat-pill:nth-child(3) { animation-delay: .12s; }
+    @keyframes fadeUp {
+      from { opacity:0; transform:translateY(6px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .stat-pill-val {
+      font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+      font-size: 24px; font-weight: 700; color: var(--secondary); line-height: 1;
+    }
+    .stat-pill-lbl { font-size: 13px; color: var(--muted); font-weight: 500; margin-top: 3px; }
+
+    /* ── TABLE CARD ── */
+    .table-card {
+      margin: 12px 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--r-lg); overflow: hidden;
+    }
+    .table-card-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .table-card-title { font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; color: var(--secondary); }
+    .table-card-badge {
+      font-size: 12px; font-weight: 600; color: var(--secondary);
+      border-radius: var(--r-sm); padding: 2px 8px;
+    }
+    .table-card-count { font-size: 13px; color: var(--muted); }
+    .table-card-count strong { color: var(--secondary); font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif; font-size: 14px; }
+
+    /* Row list */
+    .row-list { }
+    .row-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      gap: 8px; transition: background .1s;
+    }
+    .row-item:last-child { border-bottom: none; }
+    .row-item:active { background: var(--tertiary); }
+    .row-num {
+      font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 11px;
+      color: #C9BEAF; min-width: 22px; flex-shrink: 0;
+    }
+    .row-name { font-size: 15px; font-weight: 500; color: var(--secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-dept {
+      font-size: 12px; color: var(--muted);
+      background: var(--tertiary); border-radius: var(--r-sm);
+      padding: 3px 8px; white-space: nowrap;
+      max-width: 110px; overflow: hidden; text-overflow: ellipsis;
+      flex-shrink: 0;
+    }
+
+    /* Desktop table (hidden on mobile) */
+    .dt-table { display: none; width: 100%; border-collapse: collapse; font-size: 14px; }
+    @media (min-width: 482px) {
+      .row-list  { display: none; }
+      .dt-table  { display: table; }
+    }
+    .dt-table thead th {
+      padding: 10px 14px; text-align: left;
+      font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 700;
+      letter-spacing: .05em; text-transform: uppercase;
+      border-bottom: 1px solid rgba(0,0,0,.1);
+      cursor: pointer; user-select: none;
+    }
+    .dt-table tbody tr { border-bottom: 1px solid var(--border); }
+    .dt-table tbody tr:last-child { border-bottom: none; }
+    .dt-table tbody tr:hover { background: var(--tertiary); }
+    .dt-table tbody td { padding: 11px 14px; vertical-align: middle; }
+    .sort-icon { font-size: 10px; opacity: .4; margin-left: 3px; }
+    th.sort-asc  .sort-icon::after { content: '▲'; opacity: 1; }
+    th.sort-desc .sort-icon::after { content: '▼'; opacity: 1; }
+    th.sort-asc  .sort-icon,
+    th.sort-desc .sort-icon { opacity: 1; }
+
+    /* ── PAGINATION ── */
+    .pag-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; border-top: 1px solid var(--border);
+      flex-wrap: wrap; gap: 8px;
+    }
+    .pag-info { font-size: 13px; color: var(--muted); }
+    .pag-info strong { color: var(--secondary); font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif; }
+    .pag-btns { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+    .pag-btn {
+      min-width: 32px; height: 32px; padding: 0 6px;
+      border: 1px solid var(--border); border-radius: var(--r-sm);
+      background: var(--surface); font-size: 12px;
+      font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; color: var(--muted);
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all .12s;
+    }
+    .pag-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+    .pag-btn.active { background: var(--secondary); border-color: var(--secondary); color: white; }
+    .pag-btn:disabled { opacity: .3; cursor: not-allowed; }
+    .pag-btn-all {
+      height: 32px; padding: 0 10px; border: 1px solid var(--border);
+      border-radius: var(--r-sm); background: var(--surface);
+      font-size: 13px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 600;
+      color: var(--muted); cursor: pointer; display: flex; align-items: center;
+      gap: 4px; transition: all .12s; white-space: nowrap;
+    }
+    .pag-btn-all:hover  { border-color: var(--primary); color: var(--primary); }
+    .pag-btn-all.active { background: var(--secondary); border-color: var(--secondary); color: white; }
+    .pag-sep { width: 1px; height: 20px; background: var(--border); }
+
+    /* ── STATE ── */
+    .state-box {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 24px 16px; gap: 10px; text-align: center;
+    }
+    .state-box svg { width: 36px; height: 36px; fill: #C9BEAF; }
+    .state-title { font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; color: var(--muted); }
+    .state-sub { font-size: 13px; color: #B0A090; }
+
+    /* ── FOOTER ── */
+    .app-footer {
+      text-align: center; padding: 8px 16px;
+      font-size: 13px; color: var(--muted);
+      border-top: 1px solid var(--border); margin-top: 4px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── BACK TO TOP ── */
+    #backToTop {
+      position: fixed; bottom: 20px; right: 16px;
+      width: 36px; height: 36px; border-radius: var(--r-md);
+      background: var(--secondary); color: white; border: none;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: 0 4px 12px rgba(75,61,51,.25);
+      opacity: 0; pointer-events: none; transform: translateY(8px);
+      transition: opacity .2s, transform .2s; z-index: 40;
+    }
+    #backToTop svg { width: 18px; height: 18px; fill: white; }
+    #backToTop.visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+    /* ── Desktop block ───────────────────────────────────── */
+    #desktop-block {
+      display: none;
+      position: fixed; inset: 0;
+      background: var(--neutral);
+      flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 32px; z-index: 999;
+    }
+    #desktop-block h2 {
+      font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+      font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin: 0 0 8px;
+    }
+    #desktop-block p { color: var(--muted); font-size: .95rem; margin: 0; }
+  </style>
+</head>
+<body>
+
+<!-- DESKTOP BLOCK -->
+<div id="desktop-block">
+  <h2>ไม่รองรับการใช้งานบนคอมพิวเตอร์</h2>
+  <p>กรุณาเปิดลิงก์นี้ผ่านโทรศัพท์มือถือ</p>
+</div>
+
+<!-- HEADER -->
+<header class="app-header">
+  <div class="header-top">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 1 1 0 10A5 5 0 0 1 12 2zm0 12c5.33 0 8 2.67 8 4v2H4v-2c0-1.33 2.67-4 8-4z"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">SAKHONMSO P4P</div>
+        <div class="brand-sub">ข้อมูลแพทย์รายเดือน</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <div style="width:6px;height:6px;border-radius:50%;background:#A68966"></div>
+      <span class="header-clock" id="clockDisplay">--:--:--</span>
+    </div>
+  </div>
+  <div class="header-controls">
+    <select id="monthSelect" onchange="loadData()" class="ctrl-select">
+      <option value="" disabled selected>เลือกเดือน...</option>
+    </select>
+    <div class="ctrl-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="searchInput" placeholder="ค้นหาชื่อหรือแผนก..." oninput="filterAndRender()" disabled/>
+    </div>
+  </div>
+</header>
+
+<!-- STATS -->
+<div class="stats-grid" id="statsRow" style="display:none"></div>
+
+<!-- TABLE CARD -->
+<div class="table-card" id="tableCard">
+  <div class="table-card-head">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="table-card-title">รายชื่อแพทย์</span>
+      <span class="table-card-badge" id="monthBadge">—</span>
+    </div>
+    <span class="table-card-count">
+      <strong id="rowCountDisplay">—</strong> รายการ
+    </span>
+  </div>
+
+  <div id="tableContent">
+    <div class="state-box">
+      <svg viewBox="0 0 24 24"><path d="M13 2.05V4.05C17.39 4.59 20.5 8.58 19.96 12.97C19.5 16.61 16.64 19.5 13 19.93V21.93C18.5 21.38 22.5 16.5 21.95 11C21.5 6.25 17.73 2.5 13 2.05M11 2.06C9.05 2.25 7.19 3 5.67 4.26L7.1 5.74C8.22 4.84 9.57 4.26 11 4.06V2.06M4.26 5.67C3 7.19 2.25 9.04 2.05 11H4.05C4.24 9.58 4.8 8.23 5.69 7.1L4.26 5.67M2.06 13C2.26 14.96 3.03 16.81 4.27 18.33L5.69 16.9C4.81 15.77 4.24 14.42 4.06 13H2.06M7.1 18.37L5.67 19.74C7.18 21 9.04 21.79 11 22V20C9.58 19.82 8.23 19.25 7.1 18.37Z"/></svg>
+      <div class="state-title">เลือกเดือนเพื่อดูข้อมูล</div>
+    </div>
+  </div>
+
+  <div id="paginationBar" class="pag-bar" style="display:none">
+    <span class="pag-info" id="pageInfo"></span>
+    <div class="pag-btns" id="pageBtns"></div>
+  </div>
+</div>
+
+<div class="app-footer">องค์กรแพทย์ โรงพยาบาลสมุทรสาคร</div>
+
+<!-- BACK TO TOP -->
+<button id="backToTop" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+  <svg viewBox="0 0 24 24"><path d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"/></svg>
+</button>
+
+<script>
+const SUPABASE_URL = 'https://zjeizbrzcltkgtlmkbji.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-';
+const client = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ── THAI MONTH NAMES ── */
+const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
+                     'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+
+const COLOR_ARRAY = [
+  ['bg-red-300',     '#ffa2a2'],
+  ['bg-orange-300',  '#ffb86a'],
+  ['bg-yellow-300',  '#ffdf20'],
+  ['bg-lime-300',    '#bbf451'],
+  ['bg-green-300',   '#7bf1a8'],
+  ['bg-teal-300',    '#46ecd5'],
+  ['bg-cyan-300',    '#53eafd'],
+  ['bg-sky-300',     '#74d4ff'],
+  ['bg-blue-300',    '#8ec5ff'],
+  ['bg-indigo-300',  '#a3b3ff'],
+  ['bg-violet-300',  '#c4b4ff'],
+  ['bg-fuchsia-300', '#f4a8ff'],
+];
+
+/* Convert Gregorian year → Buddhist Era year (พ.ศ.) */
+function toBE(year) {
+  return year + 543;
+}
+
+/* Build table key: YYYY_MM (zero-padded) */
+function tableKey(beYear, month) {
+  return `${beYear}_${String(month).padStart(2,'0')}`;
+}
+
+/* Build Thai label: "มีนาคม 2569" */
+function thaiLabel(beYear, month) {
+  return `${THAI_MONTHS[month-1]} ${beYear}`;
+}
+
+/* Get color hex for a 1-based month number */
+function monthColor(month) {
+  return COLOR_ARRAY[(month - 1) % 12][1];
+}
+
+/* ── POPULATE DROPDOWN — current month back 5 ── */
+(function buildDropdown() {
+  const now   = new Date();
+  const sel   = document.getElementById('monthSelect');
+  let   year  = now.getFullYear();
+  let   month = now.getMonth() + 1; // 1-based
+
+  for (let i = 0; i < 6; i++) {
+    const beYear = toBE(year, month);
+    const opt    = document.createElement('option');
+    opt.value    = tableKey(beYear, month);
+    opt.textContent = thaiLabel(beYear, month);
+    sel.appendChild(opt);
+
+    // go back one month
+    month--;
+    if (month === 0) { month = 12; year--; }
+  }
+})();
+
+/* Build a lookup from tableKey → { label, color } */
+function getMonthMeta(tableKey) {
+  const [beStr, mStr] = tableKey.split('_');
+  const month = parseInt(mStr, 10);
+  const beYear = parseInt(beStr, 10);
+  return {
+    label: thaiLabel(beYear, month),
+    color: monthColor(month),
+  };
+}
+
+let allData=[], filtered=[], sortCol=null, sortDir='asc', columns=[];
+let currentPage=1, showAll=false, loadToken=0;
+const PAGE_SIZE = 25;
+
+/* clock */
+function updateClock() {
+  document.getElementById('clockDisplay').textContent =
+    new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+setInterval(updateClock,1000); updateClock();
+
+const isMobile = () => window.innerWidth <= 481;
+
+/* ── LOAD ── */
+async function loadData() {
+  const table = document.getElementById('monthSelect').value;
+  if (!table) return;
+  const myToken = ++loadToken;
+  const meta = getMonthMeta(table);
+
+  document.getElementById('paginationBar').style.display = 'none';
+  document.getElementById('statsRow').style.display = 'none';
+  document.getElementById('statsRow').innerHTML = '';
+  document.getElementById('monthBadge').textContent = meta.label;
+  document.getElementById('monthBadge').style.background = meta.color;
+  document.getElementById('monthBadge').style.borderColor = meta.color;
+  document.getElementById('monthBadge').style.color = '#4B3D33';
+  // store color for thead
+  document.getElementById('tableCard').dataset.color = meta.color;
+  document.getElementById('tableCard').style.borderTop = `3px solid ${meta.color}`;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchInput').disabled = true;
+  setLoading('กำลังโหลด...');
+  try {
+    const { data, error } = await client.from(table).select('firstname, lastname, department');
+    if (myToken !== loadToken) return;   // stale — a newer load already started
+    if (error) throw error;
+    allData = (data||[]).map(r=>({
+      name: [r.firstname,r.lastname].filter(Boolean).join(' ') || '—',
+      department: r.department || '—',
+    }));
+    allData.sort((a,b)=>a.name.localeCompare(b.name,'th'));
+    columns = ['name','department'];
+    sortCol=null; sortDir='asc'; currentPage=1; showAll=false;
+    document.getElementById('searchInput').disabled = false;
+    filterAndRender();
+  } catch(err) {
+    if (myToken !== loadToken) return;
+    document.getElementById('monthSelect').value = '';
+    document.getElementById('searchInput').disabled = true;
+    setError(err.message);
+  }
+}
+
+/* ── STATS ── */
+function renderStats() {
+  const uniqueDepts = new Set(allData.map(r=>r.department).filter(d=>d&&d!=='—')).size;
+  const q = document.getElementById('searchInput').value.trim();
+  const searchCard = q ? `
+    <div class="stat-pill">
+      <div class="stat-pill-val">${filtered.length}</div>
+      <div class="stat-pill-lbl">ผลการค้นหา</div>
+    </div>` : '';
+  document.getElementById('statsRow').style.display = 'grid';
+  document.getElementById('statsRow').innerHTML = `
+    <div class="stat-pill">
+      <div class="stat-pill-val">${allData.length.toLocaleString()}</div>
+      <div class="stat-pill-lbl">แพทย์ทั้งหมด</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-pill-val">${uniqueDepts}</div>
+      <div class="stat-pill-lbl">แผนก</div>
+    </div>
+    ${searchCard}`;
+}
+
+/* ── FILTER ── */
+function filterAndRender() {
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  filtered = q
+    ? allData.filter(r=>Object.values(r).some(v=>v&&String(v).toLowerCase().includes(q)))
+    : [...allData];
+  if (sortCol) sortFiltered();
+  currentPage=1; renderStats(); renderTable();
+}
+
+/* ── SORT ── */
+function sortFiltered() {
+  filtered.sort((a,b)=>{
+    let av=a[sortCol],bv=b[sortCol];
+    if(av==null)return 1; if(bv==null)return -1;
+    const n=parseFloat(av),m=parseFloat(bv);
+    if(!isNaN(n)&&!isNaN(m)) return sortDir==='asc'?n-m:m-n;
+    return sortDir==='asc'
+      ? String(av).localeCompare(String(bv),'th')
+      : String(bv).localeCompare(String(av),'th');
+  });
+}
+function handleSort(col) {
+  sortDir = sortCol===col?(sortDir==='asc'?'desc':'asc'):'asc';
+  sortCol=col; sortFiltered(); currentPage=1; renderTable();
+}
+
+/* ── RENDER ── */
+function renderTable() {
+  document.getElementById('rowCountDisplay').textContent = filtered.length;
+  if (!filtered.length) { setEmpty(); document.getElementById('paginationBar').style.display='none'; return; }
+
+  const effectiveSize = showAll ? filtered.length : PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / effectiveSize));
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start    = showAll ? 0 : (currentPage-1)*PAGE_SIZE;
+  const pageRows = showAll ? filtered : filtered.slice(start, start+PAGE_SIZE);
+
+  /* Mobile row list */
+  const thColor = document.getElementById('tableCard').dataset.color || '#E8E3DC';
+  let rowList = '<div class="row-list">';
+  pageRows.forEach((row,i)=>{
+    const name = row.name==='—'?'<span style="color:#C9BEAF">—</span>':escHtml(row.name);
+    const deptStyle = `background:${thColor};color:#4B3D33;border:none`;
+    const dept = row.department==='—'?'':`<span class="row-dept" style="${deptStyle}">${escHtml(row.department)}</span>`;
+    rowList += `<div class="row-item" style="border-left:3px solid ${thColor};padding-left:11px">
+      <span class="row-num">${start+i+1}</span>
+      <span class="row-name">${name}</span>
+      ${dept}
+    </div>`;
+  });
+  rowList += '</div>';
+
+  /* Desktop table */
+  const COL_LABELS = {name:'ชื่อ-นามสกุล',department:'แผนก'};
+  let thead = `<thead><tr style="background:${thColor}"><th style="width:36px;color:#4B3D33;font-family:'Manrope',sans-serif">#</th>`;
+  columns.forEach(col=>{
+    const sc = sortCol===col?'sort-'+sortDir:'';
+    thead+=`<th class="${sc}" data-col="${escHtml(col)}" onclick="handleSort(this.dataset.col)" style="color:#4B3D33;font-family:'Manrope',sans-serif">${COL_LABELS[col]||escHtml(col)}<span class="sort-icon"></span></th>`;
+  });
+  thead+='</tr></thead>';
+  let tbody='<tbody>';
+  pageRows.forEach((row,i)=>{
+    tbody+='<tr>';
+    tbody+=`<td style="font-family:'Work Sans','Noto Sans Thai Looped',sans-serif;font-size:12px;color:#C9BEAF">${start+i+1}</td>`;
+    columns.forEach(col=>{
+      const val=row[col];
+      tbody+=`<td>${(val===null||val===undefined||val===''||val==='—')?'<span style="color:#C9BEAF">—</span>':escHtml(String(val))}</td>`;
+    });
+    tbody+='</tr>';
+  });
+  tbody+='</tbody>';
+
+  document.getElementById('tableContent').innerHTML =
+    rowList + `<div style="overflow-x:auto"><table class="dt-table">${thead}${tbody}</table></div>`;
+
+  /* Pagination */
+  document.getElementById('paginationBar').style.display = 'flex';
+  const shownEnd = showAll?filtered.length:Math.min(start+PAGE_SIZE,filtered.length);
+  document.getElementById('pageInfo').innerHTML =
+    `<strong>${showAll?1:start+1}–${shownEnd}</strong> จาก <strong>${filtered.length}</strong>`;
+
+  const btnsEl = document.getElementById('pageBtns');
+  btnsEl.innerHTML='';
+
+  const allBtn = document.createElement('button');
+  allBtn.className='pag-btn-all';
+  if (showAll) {
+    allBtn.style.background = thColor;
+    allBtn.style.borderColor = thColor;
+    allBtn.style.color = '#4B3D33';
+  }
+  allBtn.innerHTML=`<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>ทั้งหมด`;
+  allBtn.onclick=()=>{ showAll=!showAll;currentPage=1;renderTable();document.getElementById('tableCard').scrollIntoView({behavior:'smooth',block:'start'}); };
+  btnsEl.appendChild(allBtn);
+
+  if(!showAll){
+    const sep=document.createElement('div'); sep.className='pag-sep'; btnsEl.appendChild(sep);
+    const mk=(label,page,active,disabled)=>{
+      const b=document.createElement('button');
+      b.className='pag-btn';
+      if (active) {
+        b.style.background = thColor;
+        b.style.borderColor = thColor;
+        b.style.color = '#4B3D33';
+      }
+      b.disabled=disabled; b.textContent=label;
+      b.onclick=()=>{ currentPage=page;renderTable();document.getElementById('tableCard').scrollIntoView({behavior:'smooth',block:'start'}); };
+      btnsEl.appendChild(b);
+    };
+    mk('‹',currentPage-1,false,currentPage===1);
+    (isMobile()?pageRangeMobile(currentPage,totalPages):pageRange(currentPage,totalPages)).forEach(p=>{
+      if(p==='…'){const s=document.createElement('button');s.className='pag-btn';s.disabled=true;s.textContent='…';btnsEl.appendChild(s);}
+      else mk(p,p,p===currentPage,false);
+    });
+    mk('›',currentPage+1,false,currentPage===totalPages);
+  }
+}
+
+function setLoading(msg){
+  document.getElementById('tableContent').innerHTML=`
+    <div class="state-box">
+      <svg viewBox="0 0 24 24" style="fill:none;stroke:#a1a1aa;stroke-width:2;animation:spin 1s linear infinite">
+        <path d="M12 2a10 10 0 0 1 10 10"/>
+      </svg>
+      <div class="state-title">${msg}</div>
+    </div>`;
+}
+function setEmpty(){
+  document.getElementById('tableContent').innerHTML=`
+    <div class="state-box">
+      <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5 1.41-1.41L12 14.17l7.59-7.59L21 8l-9 9z"/></svg>
+      <div class="state-title">ไม่พบข้อมูล</div>
+      <div class="state-sub">ลองเปลี่ยนคำค้นหา</div>
+    </div>`;
+}
+function setError(msg){
+  document.getElementById('tableContent').innerHTML=`
+    <div class="state-box">
+      <svg viewBox="0 0 24 24" style="fill:#fca5a5"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+      <div class="state-title">โหลดข้อมูลไม่ได้</div>
+      <div class="state-sub">${escHtml(msg)}</div>
+    </div>`;
+}
+
+function pageRange(c,t){
+  if(t<=7)return Array.from({length:t},(_,i)=>i+1);
+  if(c<=4)return[1,2,3,4,5,'…',t];
+  if(c>=t-3)return[1,'…',t-4,t-3,t-2,t-1,t].filter(p=>p==='…'||p>=1);
+  return[1,'…',c-1,c,c+1,'…',t];
+}
+function pageRangeMobile(c,t){
+  if(t<=5)return Array.from({length:t},(_,i)=>i+1);
+  if(c<=2)return[1,2,3,'…',t];
+  if(c>=t-1)return[1,'…',t-2,t-1,t];
+  return[1,'…',c,'…',t];
+}
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+/* desktop block */
+const _db = document.getElementById('desktop-block');
+if (!/Line\//i.test(navigator.userAgent)) {
+  if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    _db.querySelector('h2').textContent = 'กรุณาเปิดผ่าน LINE application';
+    _db.querySelector('p').textContent  = 'ขอบคุณสำหรับความร่วมมือ';
+  }
+  _db.style.display = 'flex';
+}
+
+/* back to top */
+const btt=document.getElementById('backToTop');
+window.addEventListener('scroll',()=>btt.classList.toggle('visible',window.scrollY>200),{passive:true});
+</script>
+</body>
+</html>

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SAKHONMSO P4P</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Work+Sans:wght@300;400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary:   #A68966;
+            --secondary: #4B3D33;
+            --tertiary:  #F5F5F0;
+            --neutral:   #FAF9F6;
+            --surface:   #FFFFFF;
+            --border:    #ECE7DF;
+            --text:      #3A2F27;
+            --muted:     #9A8A7A;
+            --faint:     #C7BBAD;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+        html { height: 100%; }
+        body {
+            font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
+            background: var(--neutral);
+            color: var(--text);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Desktop block ───────────────────────────────────── */
+        #desktop-block {
+            display: none;
+            position: fixed; inset: 0;
+            background: var(--neutral);
+            flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; padding: 32px; z-index: 999;
+        }
+        #desktop-block h2 {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
+        }
+        #desktop-block p { color: var(--muted); font-size: .95rem; }
+
+        /* ── Top band ───────────────────────────────────────────── */
+        .topband {
+            position: relative; overflow: hidden;
+            border-radius: 0 0 24px 24px;
+            box-shadow: 0 10px 30px rgba(58,47,39,.22);
+            background:
+                radial-gradient(135% 110% at 88% -25%, rgba(166,137,102,.62) 0%, rgba(166,137,102,0) 58%),
+                linear-gradient(155deg, #5C4A3A 0%, #4B3D33 50%, #362A22 100%);
+        }
+        /* diagonal sheen */
+        .topband::after {
+            content: ""; position: absolute; top: -60%; left: -25%;
+            width: 70%; height: 170%;
+            background: linear-gradient(90deg, rgba(255,255,255,.07), rgba(255,255,255,0));
+            transform: rotate(16deg); pointer-events: none;
+        }
+        /* decorative racing-flag motif (competition feel) */
+        .race-flag {
+            position: absolute; z-index: 0;
+            top: 14px; right: 12px;
+            width: 104px; height: 104px;
+            color: #E6D2B6; opacity: .15;
+            transform: rotate(-7deg);
+            pointer-events: none;
+        }
+        .hero {
+            position: relative; z-index: 1;
+            padding: 34px 24px 4px;
+        }
+        .hero-eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-size: 18px; font-weight: 700; letter-spacing: .5px;
+            color: #E6D2B6; text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+        .hero-eyebrow .dot {
+            width: 7px; height: 7px; border-radius: 50%;
+            background: #E6D2B6;
+            animation: pulse 2.4s infinite;
+        }
+        @keyframes pulse {
+            0%   { box-shadow: 0 0 0 0 rgba(230,210,182,.6); }
+            70%  { box-shadow: 0 0 0 8px rgba(230,210,182,0); }
+            100% { box-shadow: 0 0 0 0 rgba(230,210,182,0); }
+        }
+        .hero-title {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-weight: 800; font-size: 20px; line-height: 1.2;
+            color: #fff; letter-spacing: 0;
+            text-shadow: 0 2px 16px rgba(0,0,0,.22);
+        }
+        .hero-subtitle {
+            font-size: 16px; color: #fff; margin-top: 6px; font-weight: 400;
+            font-family: 'Noto Sans Thai Looped', 'Work Sans', sans-serif;
+        }
+
+        /* ── Month tabs (underline, riding on the gradient) ── */
+        .tabs {
+            position: relative; z-index: 1;
+        }
+        .tabs-inner {
+            display: flex; gap: 4px; overflow-x: auto;
+            padding: 16px 18px 0; scrollbar-width: none;
+        }
+        .tabs-inner::-webkit-scrollbar { display: none; }
+        .tab {
+            flex-shrink: 0; position: relative;
+            padding: 8px 10px 18px;
+            font-size: 14px; font-weight: 500; color: rgba(255,255,255,.55);
+            background: none; border: none; cursor: pointer;
+            font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
+            white-space: nowrap; transition: color .15s;
+        }
+        .tab.active { color: #fff; font-weight: 600; }
+        .tab .tab-underline {
+            position: absolute; left: 8px; right: 8px; bottom: 10px; height: 3px;
+            border-radius: 3px; background: #E6D2B6;
+            transform: scaleX(0); transition: transform .2s ease;
+        }
+        .tab.active .tab-underline { transform: scaleX(1); }
+
+        /* ── Sticky header ──────────────────────────────────── */
+        .sticky-top {
+            position: relative; z-index: 50;
+            background: var(--neutral);
+            flex-shrink: 0;
+        }
+        .sticky-top::after {
+            content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 10px;
+            background: linear-gradient(rgba(58,47,39,.05), rgba(58,47,39,0));
+            pointer-events: none;
+        }
+
+        /* ── Content ─────────────────────────────────────────── */
+        #content { padding: 8px 24px 70px; flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overflow-anchor: none; }
+
+        #spinner {
+            width: 32px; height: 32px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin .75s linear infinite;
+            margin: 56px auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Timeline ────────────────────────────────────────── */
+        #timeline { display: none; position: relative; padding-top: 8px; }
+
+        /* the vertical spine */
+        #timeline::before {
+            content: ""; position: absolute;
+            left: 19px; top: 18px; bottom: 18px; width: 2px;
+            background: linear-gradient(180deg, var(--primary) 0%, var(--border) 70%);
+            border-radius: 2px;
+        }
+
+        @keyframes rise {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .tl-item {
+            position: relative;
+            padding: 0 0 22px 54px;
+            animation: rise .4s ease both;
+        }
+        .tl-item:last-child { padding-bottom: 4px; }
+
+        /* node on the spine */
+        .tl-node {
+            position: absolute; left: 0; top: 0;
+            width: 40px; height: 40px; border-radius: 50%;
+            background: var(--surface);
+            border: 2px solid var(--border);
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'Manrope', sans-serif; font-weight: 700;
+            font-size: 15px; color: var(--muted);
+            box-shadow: 0 4px 12px rgba(75,61,51,.18);
+            z-index: 1;
+        }
+        /* medal podium — gold / silver / bronze */
+        .tl-item.r1 .tl-node {
+            background: linear-gradient(140deg, #E6C66E 0%, #C49B43 100%);
+            border-color: #C49B43; color: #fff;
+            width: 44px; height: 44px; font-size: 17px;
+            box-shadow: 0 5px 16px rgba(196,155,67,.45);
+        }
+        .tl-item.r2 .tl-node {
+            background: linear-gradient(140deg, #D4CEC4 0%, #968F84 100%);
+            border-color: #968F84; color: #fff;
+            box-shadow: 0 4px 12px rgba(150,143,132,.4);
+        }
+        .tl-item.r3 .tl-node {
+            background: linear-gradient(140deg, #CC8E58 0%, #97612F 100%);
+            border-color: #97612F; color: #fff;
+            box-shadow: 0 4px 12px rgba(151,97,47,.4);
+        }
+
+        /* flag tag on the leader */
+        .lead-tag {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 11px; font-weight: 700; letter-spacing: .4px;
+            color: var(--primary); text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        .lead-tag svg { width: 13px; height: 13px; }
+
+        .tl-name {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-weight: 700; font-size: 17px; color: var(--text);
+            line-height: 1.25;
+        }
+        .tl-item.r1 .tl-name { font-size: 20px; }
+
+        .tl-meta {
+            display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            margin-top: 7px;
+        }
+        .tl-dept {
+            font-size: 12.5px; color: var(--muted);
+        }
+        .tl-sep { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+        .tl-time {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-family: 'Manrope', sans-serif;
+            font-size: 12.5px; font-weight: 600; color: var(--secondary);
+            background: var(--tertiary);
+            padding: 3px 9px; border-radius: 7px;
+            font-variant-numeric: tabular-nums;
+        }
+        .tl-time svg { width: 11px; height: 11px; opacity: .55; }
+        .tl-item.r1 .tl-time { background: rgba(196,155,67,.16); color: #9A7A2E; }
+
+        /* ── Empty / error ───────────────────────────────────── */
+        #empty-state {
+            display: none; text-align: center; padding: 56px 24px;
+            animation: rise .4s ease both;
+        }
+        #empty-state .es-icon {
+            width: 58px; height: 58px; margin: 0 auto 16px;
+            border-radius: 16px;
+            background: var(--tertiary);
+            display: flex; align-items: center; justify-content: center;
+        }
+        #empty-state .es-icon svg { width: 26px; height: 26px; }
+        #empty-state .es-title {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-weight: 700; font-size: 16px; color: var(--secondary); margin-bottom: 5px;
+        }
+        #empty-state .es-sub { font-size: 13.5px; color: var(--muted); }
+    </style>
+</head>
+
+<body>
+    <div id="desktop-block">
+        <h2>ไม่รองรับการใช้งานบนคอมพิวเตอร์</h2>
+        <p>กรุณาเปิดลิงก์นี้ผ่านโทรศัพท์มือถือ</p>
+    </div>
+
+    <div class="sticky-top">
+    <header class="topband">
+        <svg class="race-flag" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 3.2V20.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <rect x="5" y="4" width="14" height="8" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="5"    y="4" width="3.5" height="4" fill="currentColor"/>
+            <rect x="12"   y="4" width="3.5" height="4" fill="currentColor"/>
+            <rect x="8.5"  y="8" width="3.5" height="4" fill="currentColor"/>
+            <rect x="15.5" y="8" width="3.5" height="4" fill="currentColor"/>
+        </svg>
+        <div class="hero">
+            <div class="hero-eyebrow"><span class="dot"></span>การจัดอันดับ</div>
+            <div class="hero-title">แพทย์ที่ส่ง P4P ตามกำหนด</div>
+            <div class="hero-subtitle">(ส่งภายในวันที่ 15 ของเดือนถัดไป)</div>
+        </div>
+        <nav class="tabs">
+            <div class="tabs-inner" id="tabs-inner"></div>
+        </nav>
+    </header>
+
+    </div>
+
+    <div id="content">
+        <div id="spinner"></div>
+        <div id="timeline"></div>
+        <div id="empty-state">
+            <div class="es-icon">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="#A68966" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="es-title">ยังไม่มีการส่ง</div>
+            <div class="es-sub">เดือนนี้ยังไม่มีแพทย์ส่งไฟล์ P4P</div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js"></script>
+    <script>
+        const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
+        const SUPABASE_KEY = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
+        const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+        const THAI_MONTHS_SHORT = [
+            "ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
+            "ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."
+        ]
+        const CLOCK_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+        function buildMonths() {
+            const FLOOR = "2569_04"
+            const now = new Date()
+            let y = now.getFullYear(), m = now.getMonth()
+            const result = []
+            while (result.length < 24) {
+                if (m-- === 0) { m = 11; y-- }
+                const mo = String(m + 1).padStart(2, "0")
+                const key = `${y + 543}_${mo}`
+                result.push({ key, tab: `${THAI_MONTHS_SHORT[m]} ${y + 543}` })
+                if (key === FLOOR) break
+            }
+            return result
+        }
+
+        function deadlineISO(monthKey) {
+            const [beYear, mo] = monthKey.split("_").map(Number)
+            const ceYear = beYear - 543
+            const nextMo = mo === 12 ? 1 : mo + 1
+            const nextYear = mo === 12 ? ceYear + 1 : ceYear
+            const pad = (n) => String(n).padStart(2, "0")
+            return `${nextYear}-${pad(nextMo)}-15T23:59:59+07:00`
+        }
+
+        function formatTime(isoStr) {
+            const d   = new Date(isoStr)
+            const day = d.getDate()
+            const mo  = THAI_MONTHS_SHORT[d.getMonth()]
+            const h   = String(d.getHours()).padStart(2, "0")
+            const min = String(d.getMinutes()).padStart(2, "0")
+            return `${day} ${mo} · ${h}:${min}`
+        }
+
+        const months    = buildMonths()
+        const tabsEl    = document.getElementById("tabs-inner")
+        const spinner   = document.getElementById("spinner")
+        const timeline  = document.getElementById("timeline")
+        const emptyEl   = document.getElementById("empty-state")
+        const contentEl = document.getElementById("content")
+
+        months.forEach((m, i) => {
+            const btn = document.createElement("button")
+            btn.className = "tab" + (i === 0 ? " active" : "")
+            btn.innerHTML = `${m.tab}<span class="tab-underline"></span>`
+            btn.onclick = () => {
+                document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"))
+                btn.classList.add("active")
+                contentEl.scrollTop = 0
+                tabsEl.scrollTo({ left: btn.offsetLeft - (tabsEl.offsetWidth - btn.offsetWidth) / 2, behavior: "smooth" })
+                loadMonth(m)
+            }
+            tabsEl.appendChild(btn)
+        })
+
+        function renderRanking(data) {
+            timeline.innerHTML = ""
+
+            if (!data || data.length === 0) {
+                spinner.style.display  = "none"
+                timeline.style.display = "none"
+                emptyEl.style.display  = "block"
+                contentEl.scrollTop = 0
+                return
+            }
+
+            emptyEl.style.display = "none"
+
+            data.forEach((row, i) => {
+                const rank = i + 1
+                const el = document.createElement("div")
+                el.className = "tl-item" + (rank <= 3 ? ` r${rank}` : "")
+                el.style.animationDelay = `${i * 0.04}s`
+                const leadTag = rank === 1
+                    ? `<div class="lead-tag"><svg viewBox="0 0 24 24" fill="none"><path d="M5 3.5V20.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="5" y="4.5" width="12" height="7.5" rx="1" stroke="currentColor" stroke-width="1.5"/><rect x="5" y="4.5" width="6" height="3.75" fill="currentColor"/><rect x="11" y="8.25" width="6" height="3.75" fill="currentColor"/></svg>ส่งเป็นคนแรก</div>` : ""
+                el.innerHTML = `
+                    <div class="tl-node">${rank}</div>
+                    ${leadTag}
+                    <div class="tl-name">${row.physician_name}</div>
+                    <div class="tl-meta">
+                        <span class="tl-dept">${row.department ?? "—"}</span>
+                        <span class="tl-sep"></span>
+                        <span class="tl-time">${CLOCK_SVG}${formatTime(row.submitted_at)}</span>
+                    </div>`
+                timeline.appendChild(el)
+            })
+
+            spinner.style.display  = "none"
+            timeline.style.display = "block"
+            contentEl.scrollTop = 0
+        }
+
+        async function loadMonth(monthObj) {
+            spinner.style.display  = "block"
+            timeline.style.display = "none"
+            emptyEl.style.display  = "none"
+
+            try {
+                const subRes = await db.from("p4p_submissions")
+                    .select("physician_name, department, submitted_at")
+                    .eq("work_month", monthObj.key)
+                    .lte("submitted_at", deadlineISO(monthObj.key))
+                    .order("submitted_at", { ascending: true })
+                    .limit(500)
+                if (subRes.error) throw subRes.error
+                renderRanking(subRes.data)
+            } catch (err) {
+                console.error(err)
+                spinner.style.display  = "none"
+                timeline.style.display = "none"
+                emptyEl.querySelector(".es-title").textContent = "เกิดข้อผิดพลาด"
+                emptyEl.querySelector(".es-sub").textContent   = "ไม่สามารถโหลดข้อมูลได้"
+                emptyEl.style.display = "block"
+            }
+        }
+
+        const _block = document.getElementById("desktop-block")
+        if (/Line\//i.test(navigator.userAgent)) {
+            loadMonth(months[0])
+        } else if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+            _block.querySelector("h2").textContent = "กรุณาเปิดผ่าน LINE application"
+            _block.querySelector("p").textContent  = "ขอบคุณสำหรับความร่วมมือ"
+            _block.style.display = "flex"
+        } else {
+            _block.style.display = "flex"
+        }
+    </script>
+</body>
+
+</html>

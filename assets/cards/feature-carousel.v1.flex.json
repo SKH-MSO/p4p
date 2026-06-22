@@ -1,0 +1,347 @@
+{
+  "type": "flex",
+  "altText": "อัปเดตใหม่ — ระบบ P4P มีฟีเจอร์ใหม่ 3 อย่าง",
+  "contents": {
+    "type": "carousel",
+    "contents": [
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://p4p-sakhonmso.vercel.app/assets/cards/v1/cover.png",
+          "size": "full",
+          "aspectRatio": "270:380",
+          "aspectMode": "cover"
+        }
+      },
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://p4p-sakhonmso.vercel.app/assets/cards/v1/status.png",
+          "size": "full",
+          "aspectRatio": "27:17",
+          "aspectMode": "cover"
+        },
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "paddingAll": "16px",
+          "backgroundColor": "#FFFFFF",
+          "contents": [
+            {
+              "type": "text",
+              "text": "ฟีเจอร์",
+              "size": "xs",
+              "weight": "bold",
+              "color": "#00A300"
+            },
+            {
+              "type": "text",
+              "text": "สถานะการส่ง P4P",
+              "size": "lg",
+              "weight": "bold",
+              "color": "#333333",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [],
+              "width": "34px",
+              "height": "3px",
+              "backgroundColor": "#00C300",
+              "cornerRadius": "2px",
+              "margin": "md"
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "เช็คสถานะการส่ง ย้อนหลัง 6 เดือน",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "กดที่เมนูด้านล่าง เพื่อเลือกเดือน",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "สามารถพิมพ์ เพื่อค้นหาชื่อหรือกลุ่มงาน",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://p4p-sakhonmso.vercel.app/assets/cards/v1/ranking.png",
+          "size": "full",
+          "aspectRatio": "27:17",
+          "aspectMode": "cover"
+        },
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "paddingAll": "16px",
+          "backgroundColor": "#FFFFFF",
+          "contents": [
+            {
+              "type": "text",
+              "text": "ฟีเจอร์",
+              "size": "xs",
+              "weight": "bold",
+              "color": "#00A300"
+            },
+            {
+              "type": "text",
+              "text": "อันดับการส่ง P4P",
+              "size": "lg",
+              "weight": "bold",
+              "color": "#333333",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [],
+              "width": "34px",
+              "height": "3px",
+              "backgroundColor": "#00C300",
+              "cornerRadius": "2px",
+              "margin": "md"
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "แสดงรายชื่อ ผู้ที่ส่งภายในกำหนด",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "เรียงลำดับชื่อ ตามวันที่ส่ง",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "เพื่อกระตุ้นให้ส่งตามเวลา",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://p4p-sakhonmso.vercel.app/assets/cards/v1/list.png",
+          "size": "full",
+          "aspectRatio": "27:17",
+          "aspectMode": "cover"
+        },
+        "body": {
+          "type": "box",
+          "layout": "vertical",
+          "paddingAll": "16px",
+          "backgroundColor": "#FFFFFF",
+          "contents": [
+            {
+              "type": "text",
+              "text": "ฟีเจอร์",
+              "size": "xs",
+              "weight": "bold",
+              "color": "#00A300"
+            },
+            {
+              "type": "text",
+              "text": "ผู้มีสิทธิ์รับ P4P",
+              "size": "lg",
+              "weight": "bold",
+              "color": "#333333",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [],
+              "width": "34px",
+              "height": "3px",
+              "backgroundColor": "#00C300",
+              "cornerRadius": "2px",
+              "margin": "md"
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "อ้างอิงข้อมูลจากงานทรัพยฯ",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#00C300",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "ตรวจสอบข้อมูลย้อนหลังได้ 6 เดือน",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

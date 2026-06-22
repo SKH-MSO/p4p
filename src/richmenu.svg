@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 2500 843" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FAF9F6"/>
+      <stop offset="100%" stop-color="#EDE5D8"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.80"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.44"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Block 1: Burnt copper -->
+    <linearGradient id="copper" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#B86A44"/>
+      <stop offset="100%" stop-color="#8A4428"/>
+    </linearGradient>
+    <!-- Block 2: Gold -->
+    <linearGradient id="gold" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#E8CE7C"/>
+      <stop offset="100%" stop-color="#B58228"/>
+    </linearGradient>
+    <!-- Block 3: Forest sage -->
+    <linearGradient id="sage" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#6A9070"/>
+      <stop offset="100%" stop-color="#446050"/>
+    </linearGradient>
+    <radialGradient id="lens" cx="38%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.50"/>
+      <stop offset="70%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="cs" x="-6%" y="-6%" width="112%" height="120%">
+      <feDropShadow dx="0" dy="10" stdDeviation="22" flood-color="#4B3D33" flood-opacity="0.13"/>
+    </filter>
+    <filter id="is" x="-28%" y="-28%" width="156%" height="156%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#3A2F27" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+
+  <rect width="2500" height="843" fill="url(#bg)"/>
+
+  <!-- ═══ CARD 1: สถานะการส่ง P4P ═══ -->
+  <rect x="56"  y="56" width="759" height="731" rx="30" fill="url(#glass)" stroke="#B86A44" stroke-opacity="0.30" stroke-width="1.5" filter="url(#cs)"/>
+  <rect x="56"  y="56" width="759" height="400" rx="30" fill="url(#sheen)"/>
+  <circle cx="435" cy="350" r="185" fill="url(#copper)" filter="url(#is)"/>
+  <circle cx="435" cy="350" r="185" fill="url(#lens)"/>
+  <g transform="translate(435,346) scale(1.47)" fill="none" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="-50" y="-62" width="100" height="124" rx="10"/>
+    <rect x="-22" y="-74" width="44" height="24" rx="6" fill="#FFFFFF" fill-opacity="0.28" stroke="#FFFFFF" stroke-opacity="0.65" stroke-width="5.4"/>
+    <line x1="-28" y1="-14" x2="28" y2="-14"/>
+    <line x1="-28" y1="12" x2="28" y2="12"/>
+    <polyline points="-26,42 -8,60 28,24" stroke-width="8.8" fill="none"/>
+  </g>
+  <text x="435" y="640" text-anchor="middle"
+    font-family="'Noto Sans Thai',sans-serif"
+    font-size="82" font-weight="700" fill="#2D2218">สถานะการส่ง P4P</text>
+  <rect x="365" y="666" width="140" height="5" rx="2.5" fill="#B86A44" opacity="0.6"/>
+
+  <!-- ═══ CARD 2: อันดับการส่ง P4P ═══ -->
+  <rect x="871" y="56" width="759" height="731" rx="30" fill="url(#glass)" stroke="#C49B43" stroke-opacity="0.32" stroke-width="1.5" filter="url(#cs)"/>
+  <rect x="871" y="56" width="759" height="400" rx="30" fill="url(#sheen)"/>
+  <circle cx="1250" cy="350" r="185" fill="url(#gold)" filter="url(#is)"/>
+  <circle cx="1250" cy="350" r="185" fill="url(#lens)"/>
+  <g transform="translate(1250,342) scale(1.47)" fill="none" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-46,-60 h92 v62 q0,46 -46,62 q-46,-16 -46,-62 z"/>
+    <path d="M-46,-36 q-36,0 -36,34 q0,24 30,28"/>
+    <path d="M46,-36 q36,0 36,34 q0,24 -30,28"/>
+    <line x1="0" y1="64" x2="0" y2="82"/>
+    <line x1="-32" y1="82" x2="32" y2="82"/>
+  </g>
+  <text x="1250" y="360" text-anchor="middle" font-size="54" fill="#FFFFFF" opacity="0.9">&#9733;</text>
+  <text x="1250" y="640" text-anchor="middle"
+    font-family="'Noto Sans Thai',sans-serif"
+    font-size="82" font-weight="700" fill="#2D2218">อันดับการส่ง P4P</text>
+  <rect x="1180" y="666" width="140" height="5" rx="2.5" fill="#C49B43" opacity="0.6"/>
+
+  <!-- ═══ CARD 3: ผู้มีสิทธิ์รับ P4P ═══ -->
+  <rect x="1686" y="56" width="759" height="731" rx="30" fill="url(#glass)" stroke="#6A9070" stroke-opacity="0.35" stroke-width="1.5" filter="url(#cs)"/>
+  <rect x="1686" y="56" width="759" height="400" rx="30" fill="url(#sheen)"/>
+  <circle cx="2066" cy="350" r="185" fill="url(#sage)" filter="url(#is)"/>
+  <circle cx="2066" cy="350" r="185" fill="url(#lens)"/>
+  <g transform="translate(2066,342) scale(1.47)" fill="none" stroke="#FFFFFF" stroke-width="6.8" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="0" cy="-52" r="32"/>
+    <path d="M-54,78 q0,-58 54,-58 q54,0 54,58"/>
+    <line x1="0" y1="14" x2="0" y2="50" stroke-width="9.5"/>
+    <line x1="-18" y1="32" x2="18" y2="32" stroke-width="9.5"/>
+  </g>
+  <text x="2066" y="640" text-anchor="middle"
+    font-family="'Noto Sans Thai',sans-serif"
+    font-size="82" font-weight="700" fill="#2D2218">ผู้มีสิทธิ์รับ P4P</text>
+  <rect x="1996" y="666" width="140" height="5" rx="2.5" fill="#6A9070" opacity="0.6"/>
+</svg>

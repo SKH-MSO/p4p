@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "@line/bot-sdk": "^10.6.0",
+    "@supabase/supabase-js": "^2.100.0",
+    "axios": "^1.13.6",
+    "connect-timeout": "^1.9.1",
+    "express": "^5.2.1"
+  },
+  "scripts": {
+    "start": "node main.js"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "sharp": "^0.35.2"
+  }
+}

@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SAKHONMSO P4P</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
+        rel="stylesheet">
+    <script src="https://kit.fontawesome.com/9b1f6eb9b1.js" crossorigin="anonymous"></script>
+    <style>
+        :root {
+            --primary: #A68966;
+            --secondary: #4B3D33;
+            --tertiary: #F5F5F0;
+            --neutral: #FAF9F6;
+            --text: #2d2d2d;
+            --text-muted: #6b6b6b;
+            --muted: #9A8A7A;
+            --border: #d9d2c8;
+            --danger: #c0392b;
+            --radius: 4px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            background: var(--neutral);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Desktop block ───────────────────────────────────── */
+        #desktop-block {
+            display: none;
+            position: fixed; inset: 0;
+            background: var(--neutral);
+            flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; padding: 32px; z-index: 999;
+        }
+        #desktop-block h2 {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
+        }
+        #desktop-block p { color: var(--muted); font-size: .95rem; }
+
+        /* Header */
+        #header {
+            display: none;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--tertiary);
+            box-shadow: 0 2px 8px rgba(75, 61, 51, 0.1);
+            flex-direction: column;
+            margin-bottom: 20px;
+        }
+
+        #header-top {
+            display: flex;
+            align-items: stretch;
+        }
+
+        #header_display {
+            flex: 1;
+            padding: 10px 12px 10px 20px;
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            font-size: 1.05rem;
+            font-weight: 600;
+            background: var(--primary);
+            color: #fff;
+        }
+
+        #header_count {
+            padding: 10px 16px 10px 12px;
+            text-align: right;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+            align-self: center;
+        }
+
+        /* Skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, var(--border) 25%, var(--tertiary) 50%, var(--border) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            color: transparent !important;
+            border-radius: var(--radius);
+            min-height: 1em;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Search area */
+        #search-area {
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: var(--neutral);
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 12px;
+            width: 100%;
+            gap: 8px;
+        }
+        .search-box svg {
+            width: 16px;
+            height: 16px;
+            opacity: 0.45;
+            flex-shrink: 0;
+        }
+        #header_search {
+            border: none;
+            outline: none;
+            background: transparent;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.95rem;
+            width: 100%;
+            color: var(--text);
+        }
+        #header_search::placeholder { color: var(--border); }
+        #header_search:disabled { opacity: 0.5; }
+
+        #header_note {
+            font-size: 0.75rem;
+            color: var(--border);
+            text-align: center;
+        }
+        #header_note.active { color: var(--text-muted); }
+
+        .radio-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            width: 100%;
+        }
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            justify-content: center;
+        }
+        .radio-option label {
+            font-size: 0.9rem;
+            color: var(--border);
+            cursor: pointer;
+        }
+        .radio-option label.active { color: var(--text); }
+        input[type="radio"] { accent-color: var(--primary); cursor: pointer; }
+
+        /* Content */
+        #content {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 16px 48px;
+            gap: 16px;
+        }
+
+        /* Hide cards during load */
+        #pending, #sent { display: none; }
+
+        /* Spinner */
+        #load {
+            width: 36px;
+            height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 32px auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Collapse sections */
+        #pending { background: #4B3D33; border-color: #4B3D33; }
+        details.collapse-section {
+            width: 100%;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--tertiary);
+            overflow: hidden;
+        }
+        details.collapse-section summary {
+            list-style: none;
+            padding: 14px 16px;
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--secondary);
+            user-select: none;
+        }
+        details.collapse-section summary::-webkit-details-marker { display: none; }
+        details.collapse-section summary::after {
+            content: "▼";
+            font-size: 0.65rem;
+            transition: transform 0.2s;
+            color: var(--primary);
+        }
+        details.collapse-section[open] summary::after { transform: rotate(180deg); }
+        .collapse-content { padding: 8px; }
+
+        /* Tables */
+        .table-box {
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--neutral);
+            overflow-x: auto;
+        }
+        table { width: 100%; border-collapse: collapse; }
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--tertiary);
+            vertical-align: middle;
+        }
+        tr:last-child td { border-bottom: none; }
+
+        .td-name { width: 100%; }
+        .name-main { font-size: 1.15rem; }
+        .name-sub { font-size: 0.9rem; color: var(--text-muted); margin-top: 2px; }
+        .td-name.not-sent .name-main { color: var(--danger); }
+        .td-status { text-align: right; white-space: nowrap; }
+
+        /* Searchable */
+        #searchable {
+            display: none;
+            width: 100%;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--neutral);
+            overflow-x: auto;
+        }
+        .dep-header td {
+            background: var(--secondary);
+            color: #fff;
+            text-align: center;
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+        .search-name { font-size: 1.15rem; }
+        .search-name.not-sent { color: var(--danger); }
+        .search-status { text-align: right; }
+        .icon-notset { color: var(--danger); }
+
+        /* Pending dropdown: dark-brown body when open, matching its summary */
+        #pending .table-box {
+            background: #4B3D33;
+            border-color: rgba(255, 255, 255, 0.14);
+        }
+        #pending td { border-bottom-color: rgba(255, 255, 255, 0.14); }
+        #pending .name-main { color: #ffffff; }
+        #pending .name-sub { color: #d8cfc4; }
+        #pending .icon-notset { color: #ff9486; }
+
+        /* Back to top */
+        #backtotop {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--primary);
+            border: none;
+            border-radius: 50%;
+            width: 44px;
+            height: 44px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(75, 61, 51, 0.3);
+            z-index: 10;
+        }
+        #backtotop svg { width: 22px; height: 22px; fill: #fff; }
+        #backtotop.hidden { display: none; }
+    </style>
+</head>
+
+<body>
+    <div id="desktop-block">
+        <h2>ไม่รองรับการใช้งานบนคอมพิวเตอร์</h2>
+        <p>กรุณาเปิดลิงก์นี้ผ่านโทรศัพท์มือถือ</p>
+    </div>
+
+    <div id="header">
+        <div id="header-top">
+            <div id="header_display" class="skeleton">เดือน..</div>
+            <div id="header_count" class="skeleton">รวบรวมข้อมูล..</div>
+        </div>
+        <div id="search-area">
+            <div class="search-box">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                    <g stroke-linejoin="round" stroke-linecap="round" stroke-width="2.5" fill="none"
+                        stroke="currentColor">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.3-4.3"></path>
+                    </g>
+                </svg>
+                <input id="header_search" type="search" placeholder="พิมพ์เพื่อค้นหา.." autocomplete="off" disabled />
+            </div>
+            <div id="header_note">พิมพ์เว้นวรรคเพื่อดูรายชื่อทั้งหมดเรียงตามกลุ่มงาน</div>
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input id="byname_input" type="radio" name="sort_mode" disabled />
+                    <label id="byname_label" for="byname_input">ชื่อแพทย์</label>
+                </div>
+                <div class="radio-option">
+                    <input id="bydep_input" type="radio" name="sort_mode" disabled />
+                    <label id="bydep_label" for="bydep_input">ชื่อกลุ่มงาน</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="content">
+        <div id="load"></div>
+        <details id="pending" class="collapse-section">
+            <summary>รายชื่อผู้ที่ยังไม่ได้ส่ง</summary>
+            <div class="collapse-content">
+                <div class="table-box">
+                    <table><tbody id="tbody_pending"></tbody></table>
+                </div>
+            </div>
+        </details>
+        <details id="sent" class="collapse-section">
+            <summary>รายชื่อผู้ที่ส่งแล้ว</summary>
+            <div class="collapse-content">
+                <div class="table-box">
+                    <table><tbody id="tbody_sent"></tbody></table>
+                </div>
+            </div>
+        </details>
+        <div id="searchable">
+            <table><tbody id="tbody_searchable"></tbody></table>
+        </div>
+    </div>
+
+    <button type="button" id="backtotop" class="hidden">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M12 4l-8 8h5v8h6v-8h5z" />
+        </svg>
+    </button>
+
+    <!-- Supabase JS client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.13.2/dist/axios.min.js"></script>
+    <script>
+        // ── Supabase ──────────────────────────────────────────────────────────
+        const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
+        const SUPABASE_KEY = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
+        const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+
+        // ── URL params ────────────────────────────────────────────────────────
+        const queryString   = decodeURIComponent(window.location.search).replace("?liff.state=", "")
+        const par_sheetname = new URLSearchParams(queryString).get("sheetname")
+
+        // ── DOM refs ──────────────────────────────────────────────────────────
+        const header         = document.getElementById("header")
+        const header_count   = document.getElementById("header_count")
+        const header_display = document.getElementById("header_display")
+        const header_search  = document.getElementById("header_search")
+        const header_note    = document.getElementById("header_note")
+        const byname_input   = document.getElementById("byname_input")
+        const byname_label   = document.getElementById("byname_label")
+        const bydep_input    = document.getElementById("bydep_input")
+        const bydep_label    = document.getElementById("bydep_label")
+        const content        = document.getElementById("content")
+        const load           = document.getElementById("load")
+        const pending        = document.getElementById("pending")
+        const sent           = document.getElementById("sent")
+        const searchable     = document.getElementById("searchable")
+        const tbody_pending  = document.getElementById("tbody_pending")
+        const tbody_sent     = document.getElementById("tbody_sent")
+        const tbody_searchable = document.getElementById("tbody_searchable")
+        const backtotop      = document.getElementById("backtotop")
+        const desktopBlock   = document.getElementById("desktop-block")
+
+        // ── Constants ─────────────────────────────────────────────────────────
+        const dep_array = ["กุมารเวชกรรม", "จักษุวิทยา", "จิตเวชและยาเสพติด", "เทคนิคการแพทย์และพยาธิวิทยาคลินิก", "นิติเวช", "ผู้ป่วยนอก", "พยาธิวิทยากายวิภาค", "รังสีวิทยา", "วิสัญญีวิทยา", "เวชกรรมฟื้นฟู", "เวชกรรมสังคม", "เวชศาสตร์ฉุกเฉิน", "ศัลยกรรม", "ศัลยกรรมออร์โธปิดิกส์", "สูติ-นรีเวชกรรม", "โสต ศอ นาสิก", "อาชีวเวชกรรม", "อายุรกรรม", "INTERN"]
+        const color_array = [
+            ["bg-red-300",     "#ffa2a2"],
+            ["bg-orange-300",  "#ffb86a"],
+            ["bg-yellow-300",  "#ffdf20"],
+            ["bg-lime-300",    "#bbf451"],
+            ["bg-green-300",   "#7bf1a8"],
+            ["bg-teal-300",    "#46ecd5"],
+            ["bg-cyan-300",    "#53eafd"],
+            ["bg-sky-300",     "#74d4ff"],
+            ["bg-blue-300",    "#8ec5ff"],
+            ["bg-indigo-300",  "#a3b3ff"],
+            ["bg-violet-300",  "#c4b4ff"],
+            ["bg-fuchsia-300", "#f4a8ff"],
+        ]
+
+        // arr row: [fullname, fullname, department, isSent (bool)]
+        // arr[0] = arr[1] = fullname  |  arr[2] = department  |  arr[3] = sent status
+        let count_true = 0
+        let arr = []
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        const displaying = (param) => {
+            const month_names = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+            const year  = param.slice(0, 4)
+            const month = parseInt(param.slice(5))
+            return month_names[month - 1] + " " + year
+        }
+
+        const scrolling = () => {
+            if (document.body.scrollTop > 20 || document.documentElement.scrollTop > 20) {
+                backtotop.classList.remove("hidden")
+            } else {
+                backtotop.classList.add("hidden")
+            }
+        }
+
+        const topping = () => { window.scrollTo({ top: 0, behavior: "smooth" }) }
+
+        // Build a searchable row (used by fulling & parting)
+        const makeSearchRow = (entry) => {
+            const tr      = document.createElement("tr")
+            const td_name = document.createElement("td")
+            td_name.classList.add("search-name")
+            td_name.innerText = entry[1]                // fullname
+            const td_status = document.createElement("td")
+            td_status.classList.add("search-status")
+            const icon = document.createElement("i")
+            if (entry[3]) {
+                icon.classList.add("fa-solid", "fa-check")
+            } else {
+                icon.classList.add("fa-solid", "fa-xmark", "icon-notset")
+                td_name.classList.add("not-sent")
+            }
+            td_status.appendChild(icon)
+            tr.appendChild(td_name)
+            tr.appendChild(td_status)
+            return tr
+        }
+
+        // Render grouped (by department) rows into tbody_searchable
+        const renderGrouped = (data) => {
+            if (data.length === 0) { searchable.style.display = "none"; return }
+            for (let i = 0; i < dep_array.length; i++) {
+                const depEntries = data
+                    .filter(e => e[2] === dep_array[i])
+                    .sort((a, b) => a[1].localeCompare(b[1], "th"))
+                if (depEntries.length === 0) continue
+                const tr_h = document.createElement("tr")
+                tr_h.classList.add("dep-header")
+                const td_h = document.createElement("td")
+                td_h.colSpan = 2
+                td_h.innerText = dep_array[i] === "INTERN" ? "INTERN" : "กลุ่มงาน" + dep_array[i]
+                tr_h.appendChild(td_h)
+                tbody_searchable.appendChild(tr_h)
+                for (const entry of depEntries) {
+                    tbody_searchable.appendChild(makeSearchRow(entry))
+                }
+            }
+        }
+
+        // ── Event listeners ───────────────────────────────────────────────────
+        window.addEventListener("scroll", scrolling)
+        backtotop.addEventListener("click", topping)
+
+        byname_input.addEventListener("change", function () {
+            pending.style.display = "block"
+            sent.style.display    = "block"
+            searchable.style.display = "none"
+            topping()
+            bydep_input.checked  = !this.checked
+            header_search.value  = ""
+        })
+
+        bydep_input.addEventListener("change", function () {
+            pending.style.display = "block"
+            sent.style.display    = "block"
+            searchable.style.display = "none"
+            topping()
+            byname_input.checked = !this.checked
+            header_search.value  = ""
+        })
+
+        header_search.addEventListener("focus", function () {
+            pending.style.display    = "block"
+            sent.style.display       = "block"
+            searchable.style.display = "none"
+            this.value = ""
+        })
+
+        header_search.addEventListener("input", function () {
+            while (tbody_searchable.firstChild) {
+                tbody_searchable.removeChild(tbody_searchable.lastChild)
+            }
+            if (this.value === "") {
+                pending.style.display    = "block"
+                sent.style.display       = "block"
+                searchable.style.display = "none"
+                return
+            }
+            pending.style.display    = "none"
+            sent.style.display       = "none"
+            searchable.style.display = "block"
+            if (/^[ ]+$/.test(this.value)) {
+                renderGrouped(arr)
+            } else if (byname_input.checked) {
+                renderGrouped(arr.filter((e) => e[1].toLowerCase().includes(this.value.trim().toLowerCase())))
+            } else if (bydep_input.checked) {
+                renderGrouped(arr.filter((e) => e[2].toLowerCase().includes(this.value.trim().toLowerCase())))
+            }
+        })
+
+        // ── Main ──────────────────────────────────────────────────────────────
+        const main = async () => {
+            if (!/Line\//i.test(navigator.userAgent)) {
+                if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                    desktopBlock.querySelector("h2").textContent = "กรุณาเปิดผ่าน LINE application"
+                    desktopBlock.querySelector("p").textContent  = "ขอบคุณสำหรับความร่วมมือ"
+                }
+                desktopBlock.style.display = "flex"
+                return
+            }
+
+            if (!par_sheetname) {
+                header.style.display     = "flex"
+                content.style.display    = "flex"
+                load.style.display       = "none"
+                header_display.innerText = "ไม่พบพารามิเตอร์"
+                header_display.classList.remove("skeleton")
+                header_count.innerText   = ""
+                header_count.classList.remove("skeleton")
+                return
+            }
+
+            header.style.display  = "flex"
+            content.style.display = "flex"
+
+            try {
+                // 1. Fetch reference names from Supabase  +  Drive file list  (parallel)
+                const [supaResp, driveResp] = await Promise.all([
+                    db.from(par_sheetname).select("firstname, lastname, department"),
+                    axios.get("/api/drive-files?sheetname=" + par_sheetname),
+                ])
+
+                if (supaResp.error) throw new Error("Supabase: " + supaResp.error.message)
+
+                const referenceRows = supaResp.data                     // rows from Supabase
+                const driveSet      = new Set(driveResp.data.files)     // Set of file names (no ext)
+
+                // 2. Style header
+                const month      = parseInt(par_sheetname.slice(5))
+                const monthColor = color_array[month - 1][1]
+                header_display.style.background = monthColor
+                header_display.style.color      = "#2d2d2d"
+                pending.querySelector("summary").style.background = "#4B3D33"
+                pending.querySelector("summary").style.color      = "#fff"
+                header_display.innerText = displaying(par_sheetname)
+                header_display.classList.remove("skeleton")
+                header_count.classList.remove("skeleton")
+                header_search.disabled = false
+                header_note.classList.add("active")
+                byname_input.disabled  = false
+                byname_input.checked   = true
+                byname_label.classList.add("active")
+                bydep_input.disabled   = false
+                bydep_label.classList.add("active")
+                load.style.display     = "none"
+                pending.style.display  = "block"
+                sent.style.display     = "block"
+
+                // 3. Build arr, compare, render rows
+                const pendingEntries = []
+                const sentEntries    = []
+
+                for (let i = 0; i < referenceRows.length; i++) {
+                    const row        = referenceRows[i]
+                    const fullname   = row.firstname + " " + row.lastname
+                    // ↓ adjust "department" to match your actual Supabase column name
+                    const department = row.department || row.dep || row.group || ""
+                    const isSent     = driveSet.has(fullname)
+
+                    arr[i] = [fullname, fullname, department, isSent]
+
+                    if (isSent) {
+                        sentEntries.push({ fullname, department })
+                        count_true++
+                    } else {
+                        pendingEntries.push({ fullname, department })
+                    }
+                }
+
+                pendingEntries.sort((a, b) => a.fullname.localeCompare(b.fullname, "th"))
+                sentEntries.sort((a, b) => a.fullname.localeCompare(b.fullname, "th"))
+
+                const makeRow = (fullname, department, isSent) => {
+                    const tr      = document.createElement("tr")
+                    const td_name = document.createElement("td")
+                    td_name.classList.add("td-name")
+                    const div = document.createElement("div")
+                    const p1  = document.createElement("p")
+                    p1.innerText = fullname
+                    p1.classList.add("name-main")
+                    const p2 = document.createElement("p")
+                    p2.innerText = department
+                    p2.classList.add("name-sub")
+                    div.appendChild(p1)
+                    div.appendChild(p2)
+                    td_name.appendChild(div)
+                    tr.appendChild(td_name)
+                    const td_status = document.createElement("td")
+                    td_status.classList.add("td-status")
+                    const icon = document.createElement("i")
+                    if (isSent) {
+                        icon.classList.add("fa-solid", "fa-check")
+                    } else {
+                        icon.classList.add("fa-solid", "fa-xmark", "icon-notset")
+                        td_name.classList.add("not-sent")
+                    }
+                    td_status.appendChild(icon)
+                    tr.appendChild(td_status)
+                    return tr
+                }
+
+                for (const e of pendingEntries) tbody_pending.appendChild(makeRow(e.fullname, e.department, false))
+                for (const e of sentEntries)    tbody_sent.appendChild(makeRow(e.fullname, e.department, true))
+
+                header_count.innerText = "(ส่ง " + count_true + " จาก " + referenceRows.length + " ราย)"
+
+            } catch (err) {
+                console.error(err)
+                load.style.display       = "none"
+                header_display.innerText = "เกิดข้อผิดพลาด"
+                header_display.classList.remove("skeleton")
+                header_count.innerText   = ""
+                header_count.classList.remove("skeleton")
+            }
+        }
+
+        main()
+    </script>
+</body>
+
+</html>
