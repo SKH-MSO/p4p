@@ -132,6 +132,16 @@
         }
         .tab.active .tab-underline { transform: scaleX(1); }
 
+        /* current month — submission window still open */
+        .tab-current { color: rgba(255,255,255,.78); }
+        .tab-live {
+            display: inline-block;
+            width: 6px; height: 6px; margin-right: 5px;
+            border-radius: 50%; background: #E6D2B6;
+            vertical-align: middle;
+            animation: pulse 2.4s infinite;
+        }
+
         /* ── Sticky header ──────────────────────────────────── */
         .sticky-top {
             position: relative; z-index: 50;
@@ -322,11 +332,12 @@
             let y = now.getFullYear(), m = now.getMonth()
             const result = []
             while (result.length < 24) {
-                if (m-- === 0) { m = 11; y-- }
                 const mo = String(m + 1).padStart(2, "0")
                 const key = `${y + 543}_${mo}`
-                result.push({ key, tab: `${THAI_MONTHS_SHORT[m]} ${y + 543}` })
+                // First tab = current month (its submission window is still open).
+                result.push({ key, tab: `${THAI_MONTHS_SHORT[m]} ${y + 543}`, current: result.length === 0 })
                 if (key === FLOOR) break
+                if (m-- === 0) { m = 11; y-- }
             }
             return result
         }
@@ -358,8 +369,9 @@
 
         months.forEach((m, i) => {
             const btn = document.createElement("button")
-            btn.className = "tab" + (i === 0 ? " active" : "")
-            btn.innerHTML = `${m.tab}<span class="tab-underline"></span>`
+            btn.className = "tab" + (i === 0 ? " active" : "") + (m.current ? " tab-current" : "")
+            const liveDot = m.current ? `<span class="tab-live"></span>` : ""
+            btn.innerHTML = `${liveDot}${m.tab}<span class="tab-underline"></span>`
             btn.onclick = () => {
                 document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"))
                 btn.classList.add("active")
