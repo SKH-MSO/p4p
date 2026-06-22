@@ -305,20 +305,16 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js" integrity="sha384-K0oxqktRvaThvYgGL4G+OK2Ih6VS6Uyu7j3+7WJgp/uWM0Yv6Xi4YEiw0BB+mPfi" crossorigin="anonymous"></script>
+    <script src="/assets/shared.js"></script>
     <script>
-        const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
-        const SUPABASE_KEY = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
-        const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+        // Supabase config + helpers come from /assets/shared.js
+        const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY)
 
-        const THAI_MONTHS_SHORT = [
-            "ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.",
-            "ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."
-        ]
+        const THAI_MONTHS_SHORT = P4P.THAI_MONTHS_SHORT
         const CLOCK_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
-        // Escape DB-derived text before it goes into innerHTML (prevents HTML/script injection).
-        const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+        const escHtml = P4P.escHtml
 
         function buildMonths() {
             const FLOOR = "2569_04"

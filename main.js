@@ -22,48 +22,13 @@ const config = {
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: LINE_ACCESS_TOKEN,
 })
-const color_array = [
-  ["bg-red-300", "#ffa2a2"],
-  ["bg-orange-300", "#ffb86a"],
-  ["bg-yellow-300", "#ffdf20"],
-  ["bg-lime-300", "#bbf451"],
-  ["bg-green-300", "#7bf1a8"],
-  ["bg-teal-300", "#46ecd5"],
-  ["bg-cyan-300", "#53eafd"],
-  ["bg-sky-300", "#74d4ff"],
-  ["bg-blue-300", "#8ec5ff"],
-  ["bg-indigo-300", "#a3b3ff"],
-  ["bg-violet-300", "#c4b4ff"],
-  ["bg-fuchsia-300", "#f4a8ff"],
-]
-const month_array = [
-  "มกราคม",
-  "กุมภาพันธ์",
-  "มีนาคม",
-  "เมษายน",
-  "พฤษภาคม",
-  "มิถุนายน",
-  "กรกฎาคม",
-  "สิงหาคม",
-  "กันยายน",
-  "ตุลาคม",
-  "พฤศจิกายน",
-  "ธันวาคม",
-]
-const month_iterator = [
-  [[0, 0], [11, -1], [10, -1], [9, -1], [8, -1], [7, -1]],
-  [[1, 0], [0, 0], [11, -1], [10, -1], [9, -1], [8, -1]],
-  [[2, 0], [1, 0], [0, 0], [11, -1], [10, -1], [9, -1]],
-  [[3, 0], [2, 0], [1, 0], [0, 0], [11, -1], [10, -1]],
-  [[4, 0], [3, 0], [2, 0], [1, 0], [0, 0], [11, -1]],
-  [[5, 0], [4, 0], [3, 0], [2, 0], [1, 0], [0, 0]],
-  [[6, 0], [5, 0], [4, 0], [3, 0], [2, 0], [1, 0]],
-  [[7, 0], [6, 0], [5, 0], [4, 0], [3, 0], [2, 0]],
-  [[8, 0], [7, 0], [6, 0], [5, 0], [4, 0], [3, 0]],
-  [[9, 0], [8, 0], [7, 0], [6, 0], [5, 0], [4, 0]],
-  [[10, 0], [9, 0], [8, 0], [7, 0], [6, 0], [5, 0]],
-  [[11, 0], [10, 0], [9, 0], [8, 0], [7, 0], [6, 0]]
-]
+// Month names, colors, and the 6-month iterator are shared with the rich-menu
+// script via src/constants.cjs (local names kept for readability below).
+const {
+  COLOR_ARRAY: color_array,
+  MONTH_NAMES: month_array,
+  MONTH_ITERATOR: month_iterator,
+} = require("./src/constants.cjs")
 
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))

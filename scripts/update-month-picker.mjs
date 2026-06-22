@@ -1,6 +1,10 @@
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 import axios from 'axios'
 import { svgToPng } from './render.mjs'
+
+// Months/colors/iterator are shared with main.js — single source of truth.
+const { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR } = createRequire(import.meta.url)('../src/constants.cjs')
 
 const TOKEN = process.env.LINE_TOKEN
 
@@ -12,39 +16,6 @@ const jsonHdr  = { ...authHdr, 'Content-Type': 'application/json' }
 const log = (m) => process.stdout.write(`${m}\n`)
 const ok  = (m) => log(`✓ ${m}`)
 
-// ── Shared data (mirrors main.js) ─────────────────────────────────────────────
-const COLOR_ARRAY = [
-  ['bg-red-300',     '#ffa2a2'],
-  ['bg-orange-300',  '#ffb86a'],
-  ['bg-yellow-300',  '#ffdf20'],
-  ['bg-lime-300',    '#bbf451'],
-  ['bg-green-300',   '#7bf1a8'],
-  ['bg-teal-300',    '#46ecd5'],
-  ['bg-cyan-300',    '#53eafd'],
-  ['bg-sky-300',     '#74d4ff'],
-  ['bg-blue-300',    '#8ec5ff'],
-  ['bg-indigo-300',  '#a3b3ff'],
-  ['bg-violet-300',  '#c4b4ff'],
-  ['bg-fuchsia-300', '#f4a8ff'],
-]
-const MONTH_NAMES = [
-  'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
-  'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม',
-]
-const MONTH_ITERATOR = [
-  [[0,0],[11,-1],[10,-1],[9,-1],[8,-1],[7,-1]],
-  [[1,0],[0,0],[11,-1],[10,-1],[9,-1],[8,-1]],
-  [[2,0],[1,0],[0,0],[11,-1],[10,-1],[9,-1]],
-  [[3,0],[2,0],[1,0],[0,0],[11,-1],[10,-1]],
-  [[4,0],[3,0],[2,0],[1,0],[0,0],[11,-1]],
-  [[5,0],[4,0],[3,0],[2,0],[1,0],[0,0]],
-  [[6,0],[5,0],[4,0],[3,0],[2,0],[1,0]],
-  [[7,0],[6,0],[5,0],[4,0],[3,0],[2,0]],
-  [[8,0],[7,0],[6,0],[5,0],[4,0],[3,0]],
-  [[9,0],[8,0],[7,0],[6,0],[5,0],[4,0]],
-  [[10,0],[9,0],[8,0],[7,0],[6,0],[5,0]],
-  [[11,0],[10,0],[9,0],[8,0],[7,0],[6,0]],
-]
 
 // ── Layout constants — 2500 × 1686 (large, easy to read) ─────────────────────
 const COLS   = [{ x: 0, w: 833 }, { x: 833, w: 834 }, { x: 1667, w: 833 }]
