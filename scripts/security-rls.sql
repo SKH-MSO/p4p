@@ -23,19 +23,21 @@
 --  all anonymous writes/deletes. Writes must use the service_role key, which
 --  bypasses RLS.
 --
---  How to run
---  ----------
---  1. Deploy the front-end change first (status must select explicit columns,
---     not "*", or it will break under the column grants). Commit 07eb53b.
---  2. Run Block 1 + Block 2 below in the Supabase SQL Editor.
---  3. Block 3 is optional (auto-secures future monthly tables).
---  All blocks are idempotent — safe to re-run.
+--  How to run (submitted_at migration)
+--  -----------------------------------
+--  1. Run this WHOLE file in the Supabase SQL editor first. It adds the
+--     submitted_at column + grants and locks down writes. Safe now — the live
+--     pages don't read submitted_at yet, so nothing breaks.
+--  2. Run scripts/backfill-submitted-at.sql to carry historical submit times
+--     over from p4p_submissions.
+--  3. THEN deploy the front-end that reads submitted_at (ranking + status).
+--  Block 3 auto-secures future YYYY_MM tables. All blocks are idempotent.
 --
 --  Verify (should DENY *, allow the listed columns, DENY writes):
 --    curl '.../rest/v1/p4p_submissions?select=*'                              -H "apikey:<pub>"   # error
 --    curl '.../rest/v1/p4p_submissions?select=physician_name,department'      -H "apikey:<pub>"   # ok
 --    curl '.../rest/v1/2569_06?select=score'                                  -H "apikey:<pub>"   # error
---    curl '.../rest/v1/2569_06?select=firstname,lastname,department'          -H "apikey:<pub>"   # ok
+--    curl '.../rest/v1/2569_06?select=firstname,lastname,department,submitted_at'  -H "apikey:<pub>"   # ok
 -- ============================================================================
 
 
