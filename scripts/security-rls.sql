@@ -10,9 +10,14 @@
 --  INSERT / UPDATE / DELETE rows via the auto-generated PostgREST API.
 --
 --  What the pages actually need (read-only):
---    ranking -> p4p_submissions : physician_name, department, work_month, submitted_at
---    status  -> <YYYY_MM> roster : firstname, lastname, department
+--    ranking -> <YYYY_MM> roster : firstname, lastname, department, submitted_at
+--    status  -> <YYYY_MM> roster : firstname, lastname, department, submitted_at
 --    list    -> <YYYY_MM> roster : firstname, lastname, department
+--
+--  submitted_at (timestamptz) is set by the automation when a P4P email is
+--  processed; "submitted" = submitted_at IS NOT NULL. p4p_submissions is now
+--  written-only (by the automation) and no longer read by the pages — its anon
+--  read grant in Block 1 may be revoked once you've confirmed nothing else uses it.
 --
 --  This script enables RLS, allows anon to READ ONLY those columns, and blocks
 --  all anonymous writes/deletes. Writes must use the service_role key, which
@@ -61,10 +66,11 @@ begin
       and tablename ~ '^[0-9]{4}_[0-9]{2}$'
   loop
     execute format('alter table public.%I enable row level security;', t);
+    execute format('alter table public.%I add column if not exists submitted_at timestamptz;', t);
     execute format('drop policy if exists "anon read roster" on public.%I;', t);
     execute format('create policy "anon read roster" on public.%I for select to anon using (true);', t);
     execute format('revoke all on public.%I from anon;', t);
-    execute format('grant select (firstname, lastname, department) on public.%I to anon;', t);
+    execute format('grant select (firstname, lastname, department, submitted_at) on public.%I to anon;', t);
   end loop;
 end $$;
 
@@ -86,10 +92,11 @@ begin
     if nm ~ '^[0-9]{4}_[0-9]{2}$' then
       begin
         execute format('alter table public.%I enable row level security;', nm);
+        execute format('alter table public.%I add column if not exists submitted_at timestamptz;', nm);
         execute format('drop policy if exists "anon read roster" on public.%I;', nm);
         execute format('create policy "anon read roster" on public.%I for select to anon using (true);', nm);
         execute format('revoke all on public.%I from anon;', nm);
-        execute format('grant select (firstname, lastname, department) on public.%I to anon;', nm);
+        execute format('grant select (firstname, lastname, department, submitted_at) on public.%I to anon;', nm);
       exception when others then
         raise warning 'secure_new_roster failed for %: %', nm, sqlerrm;
       end;

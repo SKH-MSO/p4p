@@ -360,7 +360,6 @@
 
     <!-- Supabase JS client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js" integrity="sha384-K0oxqktRvaThvYgGL4G+OK2Ih6VS6Uyu7j3+7WJgp/uWM0Yv6Xi4YEiw0BB+mPfi" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/axios@1.13.2/dist/axios.min.js" integrity="sha384-7WuMRQ9JgpoU+NRzdTf/AVDbN4O+21NgLxGDRMdimO3DB0lzVhrD3nGBkgu6tv1s" crossorigin="anonymous"></script>
     <script src="/assets/shared.js"></script>
     <script>
         // ── Supabase (config + helpers from /assets/shared.js) ────────────────
@@ -537,16 +536,13 @@
             content.style.display = "flex"
 
             try {
-                // 1. Fetch reference names from Supabase  +  Drive file list  (parallel)
-                const [supaResp, driveResp] = await Promise.all([
-                    db.from(par_sheetname).select("firstname, lastname, department"),
-                    axios.get("/api/drive-files?sheetname=" + par_sheetname),
-                ])
+                // 1. Fetch roster + submission timestamps from the month table
+                const supaResp = await db.from(par_sheetname)
+                    .select("firstname, lastname, department, submitted_at")
 
                 if (supaResp.error) throw new Error("Supabase: " + supaResp.error.message)
 
-                const referenceRows = supaResp.data                     // rows from Supabase
-                const driveSet      = new Set(driveResp.data.files)     // Set of file names (no ext)
+                const referenceRows = supaResp.data                     // rows from the month table
 
                 // 2. Style header
                 const month      = parseInt(par_sheetname.slice(5))
@@ -578,7 +574,7 @@
                     const fullname   = row.firstname + " " + row.lastname
                     // ↓ adjust "department" to match your actual Supabase column name
                     const department = row.department || row.dep || row.group || ""
-                    const isSent     = driveSet.has(fullname)
+                    const isSent     = row.submitted_at != null
 
                     arr[i] = [fullname, fullname, department, isSent]
 

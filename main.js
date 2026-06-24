@@ -7,10 +7,6 @@ const app = express()
 const port = process.env.PORT || 3000
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN
 const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET
-const GOOGLE_REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN
-const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID
 
 const headers = {
   "Content-Type": "application/json",
@@ -34,79 +30,6 @@ app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))
 app.use("/ranking", express.static("ranking"))
 app.use("/assets", express.static("assets"))
-
-// ── GET /api/drive-files?sheetname=YYYY_MM ───────────────────────────────────
-// Returns { files: ["สมชาย ใจดี", ...] }  (file names without extension)
-app.get("/api/drive-files", async (req, res) => {
-  const sheetname = req.query.sheetname
-  if (!sheetname || !/^\d{4}_\d{2}$/.test(sheetname)) {
-    return res.status(400).json({ error: "sheetname must be in YYYY_MM format" })
-  }
-
-  const year = sheetname.slice(0, 4)                        // e.g. "2568"
-  const monthNum = parseInt(sheetname.slice(5))                 // e.g. 3
-  const monthName = month_array[monthNum - 1]                    // e.g. "มีนาคม"
-
-  try {
-    // 1. Refresh access token
-    const tokenResp = await axios.post(
-      "https://oauth2.googleapis.com/token",
-      new URLSearchParams({
-        client_id: GOOGLE_CLIENT_ID,
-        client_secret: GOOGLE_CLIENT_SECRET,
-        refresh_token: GOOGLE_REFRESH_TOKEN,
-        grant_type: "refresh_token",
-      }).toString(),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    )
-    const token = tokenResp.data.access_token
-    const auth = { Authorization: `Bearer ${token}` }
-
-    // helper: list Drive items with a query
-    const driveList = (q) =>
-      axios.get("https://www.googleapis.com/drive/v3/files", {
-        params: { q, fields: "files(id,name)", pageSize: 1000 },
-        headers: auth,
-      })
-
-    // 2. Find year folder inside root  (e.g. name = "2568")
-    const yearResp = await driveList(
-      `'${DRIVE_ROOT_FOLDER_ID}' in parents and name='${year}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
-    )
-    const yearFolder = yearResp.data.files[0]
-    if (!yearFolder) return res.json({ files: [] })
-
-    // 3. Find month folder inside year  (e.g. name = "3 - มีนาคม")
-    const monthFolderName = `${monthNum} - ${monthName}`
-    const monthResp = await driveList(
-      `'${yearFolder.id}' in parents and name='${monthFolderName}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
-    )
-    const monthFolder = monthResp.data.files[0]
-    if (!monthFolder) return res.json({ files: [] })
-
-    // 4. List ALL files in month folder with pagination, strip extension
-    let allFiles = []
-    let pageToken = undefined
-    do {
-      const params = {
-        q: `'${monthFolder.id}' in parents and trashed=false`,
-        fields: "nextPageToken,files(id,name)",
-        pageSize: 1000,
-      }
-      if (pageToken) params.pageToken = pageToken
-      const resp = await axios.get("https://www.googleapis.com/drive/v3/files", { params, headers: auth })
-      allFiles = allFiles.concat(resp.data.files || [])
-      pageToken = resp.data.nextPageToken
-    } while (pageToken)
-    const files = allFiles.map((f) => f.name.replace(/\.[^/.]+$/, ""))
-    return res.json({ files })
-
-  } catch (err) {
-    console.error("Drive API error:", err.response?.data || err.message)
-    return res.status(500).json({ error: "Drive API error" })
-  }
-})
-// ─────────────────────────────────────────────────────────────────────────────
 
 app.post("/line", line.middleware(config), (req, res) => {
   Promise
