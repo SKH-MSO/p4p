@@ -1,4 +1,4 @@
-name: 📧 P4P Gmail Processor
+name: extract email
 
 on:
   schedule:

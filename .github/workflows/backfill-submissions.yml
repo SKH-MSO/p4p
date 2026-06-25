@@ -1,4 +1,4 @@
-name: 🗂️ Backfill P4P Submissions
+name: Backfill P4P Submissions
 
 on:
   workflow_dispatch:

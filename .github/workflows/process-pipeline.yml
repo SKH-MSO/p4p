@@ -1,4 +1,4 @@
-name: Process Pipeline
+name: create SK03 and merge files
 
 on:
   schedule:

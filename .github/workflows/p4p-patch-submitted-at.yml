@@ -1,4 +1,4 @@
-name: 🩹 Patch submitted_at
+name: Patch submitted_at
 
 on:
   workflow_dispatch:

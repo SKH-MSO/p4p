@@ -1,4 +1,4 @@
-name: 🔍 P4P Month Check
+name: P4P Month Check
 
 on:
   workflow_dispatch:
