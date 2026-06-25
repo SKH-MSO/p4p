@@ -1,4 +1,4 @@
-name: ! extract email
+name: "! extract email"
 
 on:
   schedule:
