@@ -1,0 +1,22 @@
+# Environment variables — NEVER commit credentials
+.env
+.env.local
+.env.*.local
+
+# Runtime log — contains physician PII (email addresses)
+error-email-log.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+
+# Claude Code session data
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

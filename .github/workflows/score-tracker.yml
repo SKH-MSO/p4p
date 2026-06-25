@@ -1,0 +1,53 @@
+name: 📈 Monthly P4P Score Tracker
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+on:
+  # Runs at 01:00 UTC on the 1st of every month (= 08:00 Bangkok time, UTC+7)
+  schedule:
+    - cron: '0 1 1 * *'
+
+  # Allow manual runs (useful for testing or catching up after an outage)
+  workflow_dispatch:
+
+# ── Job ─────────────────────────────────────────────────────────────────────
+jobs:
+  score-tracker:
+    name: Check completion & notify dept heads
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      # ── 1. Source code ───────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node.js ───────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      # ── 3. Dependencies ──────────────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 4. Run tracker ───────────────────────────────────────────────────
+      - name: Run score tracker
+        env:
+          # Gmail OAuth (shared with main pipeline)
+          GOOGLE_CLIENT_ID:     ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          # Supabase
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          # JSON object mapping department name → head's email (null = no email).
+          # e.g. {"ศัลยกรรม":"dr@hosp.com","อายุรกรรม":"dr@hosp.com","เวชกรรมฟื้นฟู":null}
+          DEPT_HEADS_JSON:      ${{ secrets.DEPT_HEADS_JSON }}
+          # Google Drive root folder ID for P4P files (used to resolve per-physician links)
+          P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
+        run: node scripts/score-tracker.mjs

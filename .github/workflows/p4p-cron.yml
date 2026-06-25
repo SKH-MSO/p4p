@@ -1,0 +1,67 @@
+name: 📧 P4P Gmail Processor
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"   # every 2 hours
+  workflow_dispatch:          # also allow manual trigger from GitHub UI
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30       # kill if stuck (safety net)
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci               # ci is faster and stricter than npm install
+
+      - name: Run P4P processor
+        env:
+          GOOGLE_CLIENT_ID      : ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET  : ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN  : ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          ANTHROPIC_API_KEY     : ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL    : ${{ secrets.ANTHROPIC_BASE_URL }}
+          CLAUDE_MODEL          : ${{ secrets.CLAUDE_MODEL }}
+          SUPABASE_URL          : ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY          : ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_BOT_TOKEN    : ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID      : ${{ secrets.TELEGRAM_CHAT_ID }}
+          P4P_FOLDER_ID         : ${{ secrets.P4P_FOLDER_ID }}
+        # Retry once on transient network/API failures; cap at 25 min to stay under job timeout
+        # set -o pipefail: makes the pipeline exit code reflect node's exit code, not tee's.
+        # Without it, `node ... | tee run.log && break` always breaks because tee exits 0.
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            echo "▶ Attempt $attempt"
+            node index.js 2>&1 | tee run.log && break
+            if [ $attempt -lt 2 ]; then
+              echo "⚠️ Attempt $attempt failed — retrying in 30s…"
+              sleep 30
+            else
+              echo "❌ All attempts failed."
+              exit 1
+            fi
+          done
+
+      - name: Upload run log
+        if: always()             # upload even if the run had errors
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-log-${{ github.run_number }}
+          path: automation/run.log
+          retention-days: 30
+          if-no-files-found: ignore
