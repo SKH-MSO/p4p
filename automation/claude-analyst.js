@@ -79,6 +79,27 @@ export function resolveBeYear(filename, subject, body) {
   return null;
 }
 
+/**
+ * Fallback: scan the first few data rows for a BE year embedded in cell text.
+ * Handles files where the year appears only inside the sheet (e.g. "พ.ศ. ....2569....").
+ * Applies the same tier logic as resolveBeYear: full BE 25xx first, then CE 20xx.
+ */
+export function resolveBeYearFromRows(rows) {
+  const beYearRe = /(?<!\d)(25\d{2})(?!\d)/;
+  const ceYearRe = /(?<!\d)(20\d{2})(?!\d)/;
+  for (const row of rows.slice(0, 15)) {
+    for (const val of Object.values(row)) {
+      if (val === null || val === undefined) continue;
+      const s = String(val);
+      let m = s.match(beYearRe);
+      if (m) return parseInt(m[1], 10);
+      m = s.match(ceYearRe);
+      if (m) return parseInt(m[1], 10) + 543;
+    }
+  }
+  return null;
+}
+
 // ── JS-side month resolver ────────────────────────────────────────────────
 // Returns 1–12 from any text source (filename / subject / body).
 // Used to select the correct sheet in multi-sheet workbooks.
@@ -672,7 +693,11 @@ export async function analyseJson(jsonData, filename = "data.json") {
   console.log(`│        👤  JS name pre-scan: ${resolvedName ?? "null (will use sheet)"}`);
 
   // Resolve BE year per-source (subject → body → filename) for highest accuracy
-  const resolvedBE = resolveBeYear(file, subject, body);
+  let resolvedBE = resolveBeYear(file, subject, body);
+  if (!resolvedBE) {
+    resolvedBE = resolveBeYearFromRows(rows);
+    if (resolvedBE) console.log(`│        📅  JS year from row data: ${resolvedBE}`);
+  }
   const yearHint   = resolvedBE
     ? `Pre-resolved BE year: ${resolvedBE}  ← USE THIS EXACT VALUE, do not recalculate.`
     : `BE year: unknown — use "0000".`;
