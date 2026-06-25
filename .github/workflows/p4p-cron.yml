@@ -9,6 +9,9 @@ jobs:
   process:
     runs-on: ubuntu-latest
     timeout-minutes: 30       # kill if stuck (safety net)
+    defaults:
+      run:
+        working-directory: automation
 
     steps:
       - name: Checkout code
@@ -19,6 +22,7 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
+          cache-dependency-path: automation/package-lock.json
 
       - name: Install dependencies
         run: npm ci               # ci is faster and stricter than npm install
@@ -58,6 +62,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: run-log-${{ github.run_number }}
-          path: run.log
+          path: automation/run.log
           retention-days: 30
           if-no-files-found: ignore

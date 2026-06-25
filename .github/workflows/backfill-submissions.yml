@@ -20,6 +20,9 @@ jobs:
   backfill:
     name: Backfill submissions from Gmail threads
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
 
     steps:
       - name: Checkout
@@ -30,6 +33,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
 
       - name: Install dependencies
         run: npm ci
