@@ -655,7 +655,14 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
   }
 
   // ── Save score to Supabase (only after Drive upload confirmed) ────────
-  const ts = emailDate ? new Date(emailDate) : new Date();
+  // Guard against an unparseable Date: header — new Date("garbage").toISOString()
+  // throws RangeError, which would otherwise abort the score save *after* the
+  // Drive upload already succeeded (file stored, but score lost).
+  let ts = emailDate ? new Date(emailDate) : new Date();
+  if (isNaN(ts.getTime())) {
+    console.warn(`│        ⚠️  Unparseable email date "${emailDate}" — falling back to now`);
+    ts = new Date();
+  }
   let scoreSaved = false;
   if (match) {
     try {
