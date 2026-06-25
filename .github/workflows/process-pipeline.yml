@@ -1,4 +1,4 @@
-name: create SK03 and merge files
+name: _create SK03 and merge files
 
 on:
   schedule:
