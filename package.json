@@ -1,0 +1,23 @@
+{
+  "name": "gmail-server-to-server",
+  "version": "1.0.0",
+  "description": "Server-to-server Gmail API access via OAuth2 refresh token",
+  "main": "index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "node setup.js",
+    "start": "node index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@supabase/supabase-js": "^2.49.0",
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "googleapis": "^144.0.0",
+    "jszip": "^3.10.1"
+  }
+}
