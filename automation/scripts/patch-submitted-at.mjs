@@ -35,17 +35,26 @@ if (labels.length === 0) {
 const labelId = labels[0].id;
 console.log(`    label ID: ${labelId}  (${labels[0].name})`);
 
-// ── 2. For each physician, search Gmail and pick the earliest matching email ─
+// ── 2. Compute CE date range from the BE TARGET_DATE ─────────────────────────
+const [beYearStr, monthStr] = TARGET_DATE.split("_");
+const ceYear  = parseInt(beYearStr, 10) - 543;
+const month   = parseInt(monthStr, 10);
+const afterDate  = `${ceYear}/${String(month).padStart(2, "0")}/01`;
+const nextMonth  = month === 12 ? 1 : month + 1;
+const nextYear   = month === 12 ? ceYear + 1 : ceYear;
+const beforeDate = `${nextYear}/${String(nextMonth).padStart(2, "0")}/01`;
+console.log(`📅  Date filter: after:${afterDate} before:${beforeDate}`);
+
+// ── 3. For each physician, search Gmail within that month window ───────────
 for (const physicianName of PHYSICIAN_NAMES) {
   console.log(`\n👤  Searching for: ${physicianName}`);
 
-  // Split into first/last to build a flexible OR query
   const tokens = physicianName.split(/\s+/).filter(Boolean);
   const nameQuery = tokens.join(" ");
 
   const messages = await gmail.listMessages({
     labelIds : labelId,
-    query    : nameQuery,
+    query    : `${nameQuery} after:${afterDate} before:${beforeDate}`,
     maxResults: 20,
   });
 
