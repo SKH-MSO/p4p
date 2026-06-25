@@ -655,6 +655,7 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
   }
 
   // ── Save score to Supabase (only after Drive upload confirmed) ────────
+  const ts = emailDate ? new Date(emailDate) : new Date();
   let scoreSaved = false;
   if (match) {
     try {
@@ -669,7 +670,6 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
   // ── Log submission for punctuality tracking ───────────────────────────
   if (scoreSaved) {
     try {
-      const ts = emailDate ? new Date(emailDate) : new Date();
       await logSubmission({
         physicianName: match.matchedName,
         department   : match.department ?? "",
