@@ -22,8 +22,9 @@ import { createClient } from "@supabase/supabase-js";
 import ExcelJS      from "exceljs";
 import { appendFileSync } from "fs";
 import { config as dotenvConfig } from "dotenv";
-import { extractScoreFromRows } from "../claude-analyst.js";
+import { resolveScore }          from "../claude-analyst.js";
 import { matchName, saveScore }  from "../supabase-client.js";
+import { MONTH_FOLDER_NAMES, MONTH_TOKENS_BY_NUM } from "../months.js";
 
 dotenvConfig({ override: true });
 
@@ -31,28 +32,6 @@ const TARGET_YEAR  = process.env.TARGET_YEAR  || "2569";
 const TARGET_MONTH = parseInt(process.env.TARGET_MONTH || "3", 10);
 const DRY_RUN      = process.env.DRY_RUN === "true";
 const DATE_KEY     = `${TARGET_YEAR}_${String(TARGET_MONTH).padStart(2, "0")}`;
-
-const MONTH_FOLDER_NAMES = {
-   1:"1 - มกราคม",  2:"2 - กุมภาพันธ์", 3:"3 - มีนาคม",
-   4:"4 - เมษายน",  5:"5 - พฤษภาคม",    6:"6 - มิถุนายน",
-   7:"7 - กรกฎาคม", 8:"8 - สิงหาคม",    9:"9 - กันยายน",
-  10:"10 - ตุลาคม", 11:"11 - พฤศจิกายน",12:"12 - ธันวาคม",
-};
-
-const MONTH_TOKENS_BY_NUM = {
-   1:["มกราคม","มกรา","มกร","มค","january","jan"],
-   2:["กุมภาพันธ์","กุมภา","กุมภ","กพ","february","feb"],
-   3:["มีนาคม","มีนา","มีน","มีค","march","mar"],
-   4:["เมษายน","เมษา","เมษ","เมย","april","apr"],
-   5:["พฤษภาคม","พฤษภ","พฤษ","พค","may"],
-   6:["มิถุนายน","มิถุน","มิถุ","มิย","june","jun"],
-   7:["กรกฎาคม","กรกฎ","กรก","กค","july","jul"],
-   8:["สิงหาคม","สิงหา","สิงห","สค","august","aug"],
-   9:["กันยายน","กันยา","กันย","กย","september","sep"],
-  10:["ตุลาคม","ตุลา","ตุล","ตค","october","oct"],
-  11:["พฤศจิกายน","พฤศจิ","พฤศ","พย","november","nov"],
-  12:["ธันวาคม","ธันวา","ธันว","ธค","december","dec"],
-};
 
 // ── Google Drive auth ─────────────────────────────────────────────────────
 function createDrive() {
@@ -224,8 +203,10 @@ async function main() {
       if (sheetCount > 1) console.log(`│  📋 ${sheetCount} sheets — using "${sheetName}"`);
       console.log(`│  📄 Rows: ${rows.length}`);
 
-      // 3. Extract score
-      const { score, method } = extractScoreFromRows(rows);
+      // 3. Extract score — use resolveScore (same as the live index.js hook) so
+      //    files with uncached =SUM(...) formulas fall through the two-tier
+      //    fallback instead of returning the largest plain number.
+      const { score, method } = resolveScore(rows);
       entry.score = score;
       console.log(`│  🔢 Score: ${score != null ? score.toFixed(2) : "none"} (${method})`);
 

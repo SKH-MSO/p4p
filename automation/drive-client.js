@@ -23,22 +23,9 @@
 
 import { google }   from "googleapis";
 import { Readable } from "stream";
+import { MONTH_FOLDER_NAMES } from "./months.js";
 
-// ── Thai month folder names (match the Drive folder names exactly) ─────────
-const MONTH_FOLDER_NAMES = {
-   1: "1 - มกราคม",
-   2: "2 - กุมภาพันธ์",
-   3: "3 - มีนาคม",
-   4: "4 - เมษายน",
-   5: "5 - พฤษภาคม",
-   6: "6 - มิถุนายน",
-   7: "7 - กรกฎาคม",
-   8: "8 - สิงหาคม",
-   9: "9 - กันยายน",
-  10: "10 - ตุลาคม",
-  11: "11 - พฤศจิกายน",
-  12: "12 - ธันวาคม",
-};
+// ── Thai month folder names live in months.js (shared with the scripts) ────
 
 function createAuthClient() {
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN } = process.env;

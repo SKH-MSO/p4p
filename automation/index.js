@@ -18,6 +18,7 @@ import { buildHtmlReply }               from "./templates/reply.js";
 import { buildHtmlErrorReply }          from "./templates/error-reply.js";
 import { checkEnv }                     from "./env-check.js";
 import { MAX_MESSAGES, SKIP_SENDERS, SEND_ERROR_REPLIES, THREAD_RELAY_SENDERS } from "./config.js";
+import { MONTH_TOKENS_BY_NUM }          from "./months.js";
 import log                              from "./logger.js";
 import * as path                        from "path";
 import ExcelJS                          from "exceljs";
@@ -119,21 +120,7 @@ async function firstSheetToRows(buffer, { targetMonth = null } = {}) {
   }
 
   if (targetMonth !== null && workbook.worksheets.length > 1) {
-    // Build a month-number → list of Thai/English tokens map for matching
-    const MONTH_TOKENS_BY_NUM = {
-      1:  ["มกราคม","มกรา","มกร","มค","january","jan"],
-      2:  ["กุมภาพันธ์","กุมภา","กุมภ","กพ","february","feb"],
-      3:  ["มีนาคม","มีนา","มีน","มีค","march","mar"],
-      4:  ["เมษายน","เมษา","เมษ","เมย","april","apr"],
-      5:  ["พฤษภาคม","พฤษภ","พฤษ","พค","may"],
-      6:  ["มิถุนายน","มิถุน","มิถุ","มิย","june","jun"],
-      7:  ["กรกฎาคม","กรกฎ","กรก","กค","july","jul"],
-      8:  ["สิงหาคม","สิงหา","สิงห","สค","august","aug"],
-      9:  ["กันยายน","กันยา","กันย","กย","september","sep"],
-      10: ["ตุลาคม","ตุลา","ตุล","ตค","october","oct"],
-      11: ["พฤศจิกายน","พฤศจิ","พฤศ","พย","november","nov"],
-      12: ["ธันวาคม","ธันวา","ธันว","ธค","december","dec"],
-    };
+    // Month-number → Thai/English token map lives in months.js (shared)
     const targetTokens = MONTH_TOKENS_BY_NUM[targetMonth] ?? [];
 
     const matched = workbook.worksheets.findIndex((ws) => {

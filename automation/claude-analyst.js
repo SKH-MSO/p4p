@@ -607,7 +607,7 @@ export function extractScoreFromRows(rows) {
  *   rows are populated, then sum that column from individual data rows only
  *   (sub-total and grand-total rows are excluded to avoid double-counting).
  */
-function resolveScore(rows) {
+export function resolveScore(rows) {
   const { score: jsScore, method: jsMethod } = extractScoreFromRows(rows);
 
   // Detect: grand-total label row present but contains no numbers
