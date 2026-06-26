@@ -3,6 +3,9 @@ name: Match Sender Emails
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   match:
     runs-on: ubuntu-latest
@@ -33,9 +36,12 @@ jobs:
 
       - name: Commit CSV to main
         working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}
           git add sender-physician-match.csv
           git commit -m "chore: update sender-physician-match.csv" || echo "No changes to commit"
           git push origin HEAD:main
