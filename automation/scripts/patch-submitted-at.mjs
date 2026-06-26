@@ -6,7 +6,7 @@
  * month table's submitted_at column.
  *
  * Usage:
- *   TARGET_DATE=2569_03 PHYSICIAN_NAMES="ณัฐพงศ์ รั้วมั่น,จารุวรรณ โชคนาคะวโร" \\
+ *   TARGET_DATE=2569_03 PHYSICIAN_NAMES="ณัฐพงศ์ รั้วมั่น,จารุวรรณ โชคนาคะวโร" \
  *     node scripts/patch-submitted-at.mjs
  */
 

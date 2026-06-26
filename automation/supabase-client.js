@@ -188,9 +188,12 @@ export async function logSubmission({ physicianName, department, workMonth, subm
 /**
  * Update the score column for a specific row identified by its primary key.
  *
- * @param {string}        date   Table name, e.g. "2569_02"
- * @param {number|string} index  Primary key value (column "index")
- * @param {number}        score  Score to save (float8)
+ * @param {string}        date          Table name, e.g. "2569_02"
+ * @param {number|string} index         Primary key value (column "index")
+ * @param {number}        score         Score to save (float8)
+ * @param {string}        [submittedAt] ISO timestamp. When omitted, the existing
+ *                                      submitted_at value is left untouched (used
+ *                                      by the score-only backfill).
  */
 export async function saveScore(date, index, score, submittedAt) {
   if (!isValidDate(date)) {
@@ -203,10 +206,16 @@ export async function saveScore(date, index, score, submittedAt) {
     throw new Error(`Cannot save score — value is not a finite number: ${score}`);
   }
 
+  // Only overwrite submitted_at when a timestamp is supplied. Passing
+  // `submitted_at: undefined` happens to be dropped by JSON.stringify today, but
+  // relying on that is fragile — build the patch explicitly instead.
+  const patch = { score };
+  if (submittedAt !== undefined) patch.submitted_at = submittedAt;
+
   const supabase = getSupabase();
   const { error } = await supabase
     .from(date)
-    .update({ score, submitted_at: submittedAt })
+    .update(patch)
     .eq("index", index);
 
   if (error) throw new Error(`Supabase update error on table "${date}": ${error.message}`);

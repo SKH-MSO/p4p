@@ -25,6 +25,7 @@ const ENV_PATH = path.join(__dirname, ".env");
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",      // read, mark read/starred, apply labels
   "https://www.googleapis.com/auth/drive",             // full Drive access — needed to replace files not created by this app
+  "https://www.googleapis.com/auth/spreadsheets",      // Sheets API — process/ pipeline creates the SK03 workbook
 ];
 
 // ── Validate env ───────────────────────────────────────────────────────────

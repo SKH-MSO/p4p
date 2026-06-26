@@ -571,7 +571,9 @@
 
                 for (let i = 0; i < referenceRows.length; i++) {
                     const row        = referenceRows[i]
-                    const fullname   = row.firstname + " " + row.lastname
+                    // null-safe join — avoids rendering "สมชาย null" when a name
+                    // column is missing (matches ranking/list pages' pattern)
+                    const fullname   = [row.firstname, row.lastname].filter(Boolean).join(" ")
                     // ↓ adjust "department" to match your actual Supabase column name
                     const department = row.department || row.dep || row.group || ""
                     const isSent     = row.submitted_at != null
