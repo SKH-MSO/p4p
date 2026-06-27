@@ -44,7 +44,9 @@ jobs:
               "text": "🟢 Email submission report\n───────────────\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx",
               "reply_markup": {
                 "inline_keyboard": [[
-                  { "text": "✅ OK", "callback_data": "ack:result" }
+                  { "text": "—", "callback_data": "noop" },
+                  { "text": "—", "callback_data": "noop" },
+                  { "text": "—", "callback_data": "noop" }
                 ]]
               }
             }'
@@ -61,7 +63,9 @@ jobs:
               "text": "🔴 P4P Processing Error\n───────────────\n\n📎 File       : workload_june.xlsx\n💬 Error      : wrong file extension — expected .xlsx",
               "reply_markup": {
                 "inline_keyboard": [[
-                  { "text": "✅ OK", "callback_data": "ack:error" }
+                  { "text": "—", "callback_data": "noop" },
+                  { "text": "—", "callback_data": "noop" },
+                  { "text": "—", "callback_data": "noop" }
                 ]]
               }
             }'
