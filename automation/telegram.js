@@ -79,7 +79,6 @@ export function formatResultMessage(result, filename) {
   // Plain text mode (no parseMode) — do NOT use *markdown* as it renders literally
   return [
     `🟢 Email submission report`,
-    `────────────────────────────────────────`,
     ``,
     `👤 Name       : ${result.name ?? "—"}`,
     `🔗 Matched    : ${result.matchedName ?? "—"}${sim}`,
@@ -97,7 +96,6 @@ export function formatResultMessage(result, filename) {
 export function formatErrorMessage(error, filename) {
   return [
     `🔴 P4P Processing Error`,
-    `────────────────────────────────────────`,
     ``,
     `📎 File       : ${filename ?? "(unknown)"}`,
     `💬 Error      : ${error ?? "unknown error"}`,
