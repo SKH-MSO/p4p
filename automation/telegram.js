@@ -78,15 +78,15 @@ export function formatResultMessage(result, filename) {
 
   // Plain text mode (no parseMode) — do NOT use *markdown* as it renders literally
   return [
-    `📋 P4P Workload Report`,
+    `🟢 P4P Workload Report`,
     ``,
-    `👤 Name     : ${result.name ?? "—"}`,
-    `🔗 Matched  : ${result.matchedName ?? "—"}${sim}`,
-    `📅 Date     : ${result.date ?? "—"}`,
-    `🏅 Score    : ${result.score ?? "—"}`,
-    `💾 ${saved}`,
+    `👤 Name       : ${result.name ?? "—"}`,
+    `🔗 Matched    : ${result.matchedName ?? "—"}${sim}`,
+    `📅 Date       : ${result.date ?? "—"}`,
+    `🏅 Score      : ${result.score ?? "—"}`,
+    `💾 Saved      : ${saved}`,
     ``,
-    `📎 File: ${filename ?? "(unknown)"}`,
+    `📎 File       : ${filename ?? "(unknown)"}`,
   ].join("\n");
 }
 
@@ -95,9 +95,9 @@ export function formatResultMessage(result, filename) {
  */
 export function formatErrorMessage(error, filename) {
   return [
-    `❌ P4P Processing Error`,
+    `🔴 P4P Processing Error`,
     ``,
-    `📎 File : ${filename ?? "(unknown)"}`,
-    `💬 Error: ${error ?? "unknown error"}`,
+    `📎 File       : ${filename ?? "(unknown)"}`,
+    `💬 Error      : ${error ?? "unknown error"}`,
   ].join("\n");
 }
