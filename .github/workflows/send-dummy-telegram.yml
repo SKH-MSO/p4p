@@ -22,7 +22,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🟡 New Sender — Pending Approval\n───────────────\n\n📧 Email      : new.doctor@gmail.com\n👤 Display    : นพ.สมชาย ใจดี\n🔍 Extracted  : สมชาย ใจดี\n✅ Best match : สมชาย ใจดีรักษ์\n   Dept       : อายุรกรรม\n   Similarity : 87%\n📨 Emails     : 3",
+              "text": "🟡 New Sender — Pending Approval\n───────────────────────\n\n📧 Email      : new.doctor@gmail.com\n👤 Display    : นพ.สมชาย ใจดี\n🔍 Extracted  : สมชาย ใจดี\n✅ Best match : สมชาย ใจดีรักษ์\n   Dept       : อายุรกรรม\n   Similarity : 87%\n📨 Emails     : 3",
               "reply_markup": {
                 "inline_keyboard": [[
                   { "text": "✅ Approve",   "callback_data": "approve:new.doctor@gmail.com" },
@@ -41,7 +41,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🟢 Email submission report\n───────────────\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx"
+              "text": "🟢 Email submission report\n───────────────────────\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx"
             }'
 
       - name: Layout 3 — Processing Error (🔴)
@@ -53,5 +53,5 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🔴 P4P Processing Error\n───────────────\n\n📎 File       : workload_june.xlsx\n💬 Error      : wrong file extension — expected .xlsx"
+              "text": "🔴 P4P Processing Error\n───────────────────────\n\n📎 File       : workload_june.xlsx\n💬 Error      : wrong file extension — expected .xlsx"
             }'
