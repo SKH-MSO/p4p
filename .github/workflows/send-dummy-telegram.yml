@@ -41,7 +41,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🟢 Email submission report\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx                           "
+              "text": "🟢 Email submission report\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx          "
             }'
 
       - name: Layout 3 — Processing Error (🔴)
@@ -53,5 +53,5 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🔴 P4P Processing Error\n\n📎 File       : workload_june.xlsx\n💬 Error      : wrong file extension — expected .xlsx                           "
+              "text": "🔴 P4P Processing Error\n\n📎 File       : workload_june.xlsx          \n💬 Error      : wrong file extension — expected .xlsx"
             }'
