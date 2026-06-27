@@ -78,7 +78,7 @@ export function formatResultMessage(result, filename) {
 
   // Plain text mode (no parseMode) — do NOT use *markdown* as it renders literally
   return [
-    `🟢 P4P Workload Report`,
+    `🟢 Email submission report`,
     ``,
     `👤 Name       : ${result.name ?? "—"}`,
     `🔗 Matched    : ${result.matchedName ?? "—"}${sim}`,
