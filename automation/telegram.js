@@ -27,7 +27,7 @@ function getConfig() {
  * @param {object} [opts]
  * @param {string} [opts.parseMode]  "MarkdownV2" | "HTML" | undefined
  */
-export async function sendTelegram(text, { parseMode } = {}) {
+export async function sendTelegram(text, { parseMode, replyMarkup } = {}) {
   const { token, chatId } = getConfig();
 
   // Guard against null/undefined — avoids TypeError on .length and .slice
@@ -39,7 +39,8 @@ export async function sendTelegram(text, { parseMode } = {}) {
   const body = {
     chat_id : chatId,
     text    : safeText.slice(0, 4096),   // Telegram hard limit
-    ...(parseMode ? { parse_mode: parseMode } : {}),
+    ...(parseMode    ? { parse_mode   : parseMode    } : {}),
+    ...(replyMarkup  ? { reply_markup : replyMarkup  } : {}),
   };
 
   const controller = new AbortController();
@@ -79,7 +80,7 @@ export function formatResultMessage(result, filename) {
   // Plain text mode (no parseMode) — do NOT use *markdown* as it renders literally
   return [
     `🟢 Email submission report`,
-    `───────────────────────`,
+    `───────────────`,
     ``,
     `👤 Name       : ${result.name ?? "—"}`,
     `🔗 Matched    : ${result.matchedName ?? "—"}${sim}`,
@@ -97,7 +98,7 @@ export function formatResultMessage(result, filename) {
 export function formatErrorMessage(error, filename) {
   return [
     `🔴 P4P Processing Error`,
-    `───────────────────────`,
+    `───────────────`,
     ``,
     `📎 File       : ${filename ?? "(unknown)"}`,
     `💬 Error      : ${error ?? "unknown error"}`,
