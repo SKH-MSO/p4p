@@ -24,11 +24,14 @@ jobs:
               "chat_id": "'"${CHAT_ID}"'",
               "text": "🟡 New Sender — Pending Approval\n\n📧 Email      : new.doctor@gmail.com\n👤 Display    : นพ.สมชาย ใจดี\n🔍 Extracted  : สมชาย ใจดี\n✅ Best match : สมชาย ใจดีรักษ์\n   Dept       : อายุรกรรม\n   Similarity : 87%\n📨 Emails     : 3",
               "reply_markup": {
-                "inline_keyboard": [[
-                  { "text": "    ✅ Approve     ",   "callback_data": "approve:new.doctor@gmail.com" },
-                  { "text": "    ✏️ Fix name     ", "callback_data": "fixname:new.doctor@gmail.com" },
-                  { "text": "    ❌ Reject     ",   "callback_data": "reject:new.doctor@gmail.com"  }
-                ]]
+                "inline_keyboard": [
+                  [
+                    { "text": "✅ Approve",   "callback_data": "approve:new.doctor@gmail.com" },
+                    { "text": "✏️ Fix name", "callback_data": "fixname:new.doctor@gmail.com" },
+                    { "text": "❌ Reject",   "callback_data": "reject:new.doctor@gmail.com"  }
+                  ],
+                  [{ "text": "                                                            ", "callback_data": "noop" }]
+                ]
               }
             }'
 
@@ -41,7 +44,10 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🟢 Email submission report\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx              "
+              "text": "🟢 Email submission report\n\n👤 Name       : สมชาย ใจดีรักษ์\n🔗 Matched    : สมชาย ใจดีรักษ์ (87% match)\n📅 Date       : 2025_06\n🏅 Score      : 95\n💾 Saved      : ✅ Score saved to DB\n\n📎 File       : workload_june.xlsx",
+              "reply_markup": {
+                "inline_keyboard": [[{ "text": "                                                            ", "callback_data": "noop" }]]
+              }
             }'
 
       - name: Layout 3 — Processing Error (🔴)
@@ -53,5 +59,23 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🔴 P4P Processing Error\n\n📎 File       : workload_june.xlsx          \n💬 Error      : wrong file extension — expected .xlsx"
+              "text": "🔴 P4P Processing Error\n\n📎 File       : workload_june.xlsx\n💬 Error      : wrong file extension — expected .xlsx",
+              "reply_markup": {
+                "inline_keyboard": [[{ "text": "                                                            ", "callback_data": "noop" }]]
+              }
+            }'
+
+      - name: Layout 4 — Full Width Test (blank)
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "chat_id": "'"${CHAT_ID}"'",
+              "text": ".",
+              "reply_markup": {
+                "inline_keyboard": [[{ "text": "                                                            ", "callback_data": "noop" }]]
+              }
             }'
