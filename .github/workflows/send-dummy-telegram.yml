@@ -74,8 +74,8 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": ".                                                       ",
+              "text": ".                                                          ",
               "reply_markup": {
-                "inline_keyboard": [[{ "text": "                                                            ", "callback_data": "noop" }]]
+                "inline_keyboard": [[{ "text": "──────────────────", "callback_data": "noop" }]]
               }
             }'
