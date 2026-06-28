@@ -87,7 +87,7 @@ export function formatResultMessage(result, filename) {
     `🏅 Score      : ${result.score ?? "—"}`,
     `💾 Saved      : ${saved}`,
     ``,
-    `📎 File       : ${filename ?? "(unknown)"}          `,
+    `📎 File       : ${filename ?? "(unknown)"}`,
   ].join("\n");
 }
 
@@ -98,7 +98,7 @@ export function formatErrorMessage(error, filename) {
   return [
     `🔴 P4P Processing Error`,
     ``,
-    `📎 File       : ${filename ?? "(unknown)"}          `,
+    `📎 File       : ${filename ?? "(unknown)"}`,
     `💬 Error      : ${error ?? "unknown error"}`,
   ].join("\n");
 }
