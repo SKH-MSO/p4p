@@ -22,12 +22,12 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{
               "chat_id": "'"${CHAT_ID}"'",
-              "text": "🟡 New Sender — Pending Approval\n\n📧 Email      : new.doctor@gmail.com\n👤 Display    : นพ.สมชาย ใจดี\n🔍 Extracted  : สมชาย ใจดี\n✅ Best match : สมชาย ใจดีรักษ์\n   Dept       : อายุรกรรม\n   Similarity : 87%\n📨 Emails     : 3",
+              "text": "🟡 New Sender — Pending Approval\n\n👤 Display    : นพ.สมชาย ใจดี\n🔍 Extracted  : สมชาย ใจดี\n✅ Best match : สมชาย ใจดีรักษ์\n   Dept       : อายุรกรรม\n   Similarity : 87%\n📨 Emails     : 3",
               "reply_markup": {
                 "inline_keyboard": [[
-                  { "text": "✅ Approve",   "callback_data": "approve:new.doctor@gmail.com" },
-                  { "text": "✏️ Fix name", "callback_data": "fixname:new.doctor@gmail.com" },
-                  { "text": "❌ Reject",   "callback_data": "reject:new.doctor@gmail.com"  }
+                  { "text": "✅ Approve",   "callback_data": "approve:pending_001" },
+                  { "text": "📱 Send SMS",  "callback_data": "sms:pending_001"     },
+                  { "text": "❌ Reject",   "callback_data": "reject:pending_001"  }
                 ]]
               }
             }'
