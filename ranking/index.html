@@ -438,8 +438,17 @@
                 console.error(err)
                 spinner.style.display  = "none"
                 timeline.style.display = "none"
-                emptyEl.querySelector(".es-title").textContent = "เกิดข้อผิดพลาด"
-                emptyEl.querySelector(".es-sub").textContent   = "ไม่สามารถโหลดข้อมูลได้"
+                // The current month's table may not exist yet (created once the
+                // first submission/admin setup happens) — treat that as "no one
+                // has sent yet" instead of a generic error.
+                const tableMissing = /does not exist|undefined_table|42P01|schema cache/i.test(err?.message ?? "")
+                if (tableMissing) {
+                    emptyEl.querySelector(".es-title").textContent = "ยังไม่มีการส่ง"
+                    emptyEl.querySelector(".es-sub").textContent   = "เดือนนี้ยังไม่มีแพทย์ส่งไฟล์ P4P"
+                } else {
+                    emptyEl.querySelector(".es-title").textContent = "เกิดข้อผิดพลาด"
+                    emptyEl.querySelector(".es-sub").textContent   = "ไม่สามารถโหลดข้อมูลได้"
+                }
                 emptyEl.style.display = "block"
             }
         }
