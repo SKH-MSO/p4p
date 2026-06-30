@@ -1,0 +1,36 @@
+name: Monthly Rich Menu Month Picker Update
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+on:
+  # Runs at 01:00 UTC on the 1st of every month (= 08:00 Bangkok time, UTC+7)
+  # so the LINE rich menu's month picker always includes the new month from
+  # day one, instead of waiting for someone to re-run the script by hand.
+  schedule:
+    - cron: '0 1 1 * *'
+
+  # Allow manual runs (useful for testing or catching up after an outage)
+  workflow_dispatch:
+
+jobs:
+  update-month-picker:
+    name: Regenerate month-picker rich menu
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update month-picker rich menu
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+        run: node scripts/update-month-picker.mjs

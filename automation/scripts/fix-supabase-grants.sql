@@ -108,23 +108,6 @@ ORDER BY tablename;
 --      auto-grants service_role on new tables, but this explicit snippet
 --      GUARANTEES it and keeps the public key out.
 --
--- HOW TO USE each month — replace the two month keys, then run:
---   • NEW = the month you are creating   (e.g. 2569_07)
---   • OLD = the previous month to copy   (e.g. 2569_06)
--- ============================================================================
---
---   -- 1. Create the new month from the previous month's structure.
---   CREATE TABLE public."2569_07" (LIKE public."2569_06" INCLUDING ALL);
---
---   -- 2. Grant the automation (service_role) only. Do NOT grant anon here —
---   --    anon's column-restricted SELECT comes from security-rls.sql / the
---   --    secure_new_roster event trigger.
---   GRANT SELECT, INSERT, UPDATE, DELETE ON public."2569_07" TO service_role;
---
---   -- 3. Run scripts/security-rls.sql (or rely on the secure_new_roster event
---   --    trigger) to enable RLS + grant anon SELECT on the public columns only.
---
---   -- 4. Import the roster CSV with the "append / insert rows" option.
---   --    Do NOT use an import that DROPS and RECREATES the table.
---
+-- See scripts/provision-month.sql for the ready-to-run, find/replace version
+-- of this (creates the table, copies the roster, grants, and RLS in one go).
 -- ============================================================================
