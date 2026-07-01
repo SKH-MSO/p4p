@@ -11,7 +11,7 @@
           "type": "image",
           "url": "https://skh-mso-p4p.vercel.app/assets/cards/v1/cover.png",
           "size": "full",
-          "aspectRatio": "270:380",
+          "aspectRatio": "3:4",
           "aspectMode": "cover"
         }
       },
@@ -22,7 +22,7 @@
           "type": "image",
           "url": "https://skh-mso-p4p.vercel.app/assets/cards/v1/status.png",
           "size": "full",
-          "aspectRatio": "27:17",
+          "aspectRatio": "20:13",
           "aspectMode": "cover"
         },
         "body": {
@@ -139,7 +139,7 @@
           "type": "image",
           "url": "https://skh-mso-p4p.vercel.app/assets/cards/v1/ranking.png",
           "size": "full",
-          "aspectRatio": "27:17",
+          "aspectRatio": "20:13",
           "aspectMode": "cover"
         },
         "body": {
@@ -256,7 +256,7 @@
           "type": "image",
           "url": "https://skh-mso-p4p.vercel.app/assets/cards/v1/list.png",
           "size": "full",
-          "aspectRatio": "27:17",
+          "aspectRatio": "20:13",
           "aspectMode": "cover"
         },
         "body": {

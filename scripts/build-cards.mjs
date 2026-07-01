@@ -47,7 +47,7 @@ const featureBubble = ({ img, title, bullets }) => ({
   size: 'mega',
   hero: {
     type: 'image', url: `${BASE_URL}/${img}`,
-    size: 'full', aspectRatio: '27:17', aspectMode: 'cover',
+    size: 'full', aspectRatio: '20:13', aspectMode: 'cover',
   },
   body: {
     type: 'box', layout: 'vertical', paddingAll: '16px', backgroundColor: '#FFFFFF',
@@ -68,7 +68,7 @@ const message = {
     contents: [
       {
         type: 'bubble', size: 'mega',
-        hero: { type: 'image', url: `${BASE_URL}/cover.png`, size: 'full', aspectRatio: '270:380', aspectMode: 'cover' },
+        hero: { type: 'image', url: `${BASE_URL}/cover.png`, size: 'full', aspectRatio: '3:4', aspectMode: 'cover' },
       },
       ...features.map(featureBubble),
     ],

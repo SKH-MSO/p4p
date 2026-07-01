@@ -33,4 +33,5 @@ if (res.ok) {
   console.log(`✓ broadcast ${ver} carousel to all followers`)
 } else {
   console.error('LINE API error:', JSON.stringify(await res.json(), null, 2))
+  process.exit(1)
 }
