@@ -29,6 +29,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Dump environment info
+        run: |
+          echo "--- node ---"
+          node -p "process.versions"
+          echo "--- os ---"
+          uname -a
+          cat /etc/os-release
+          echo "--- glibc ---"
+          ldd --version | head -1
+          echo "--- resvg-js resolved packages ---"
+          find node_modules/@resvg -maxdepth 1 -name 'package.json' -exec sh -c 'echo {}; grep -E "\"name\"|\"version\"" {}' \;
+          echo "--- fontconfig / system fonts (should be irrelevant since loadSystemFonts:false, but checking anyway) ---"
+          fc-list 2>&1 | grep -i thai || echo "no system Thai fonts found (or fc-list unavailable)"
+          echo "--- font file hashes ---"
+          sha256sum src/fonts/*.ttf
+
       - name: Download live rich menu image
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
