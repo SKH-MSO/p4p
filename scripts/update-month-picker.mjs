@@ -61,8 +61,8 @@ export function generateSVG(months) {
     return `
   <rect x="${x}" y="${y}" width="${w}" height="${ROW_H}" fill="${m.colorHex}"/>
   <text x="${cx}" y="${y + 305}" text-anchor="middle"
-    font-family="'Noto Sans Thai',sans-serif"
-    font-size="120" font-weight="700" fill="#2D2218">${m.name}</text>
+    font-family="'Noto Sans Thai Bold','Noto Sans Thai',sans-serif"
+    font-size="120" fill="#2D2218">${m.name}</text>
   <text x="${cx}" y="${y + 415}" text-anchor="middle"
     font-family="'Noto Sans Thai',sans-serif"
     font-size="78" fill="#2D2218" opacity="0.7">${m.year}</text>`
@@ -81,8 +81,8 @@ export function generateSVG(months) {
     <polyline points="-8,-54 -62,0 -8,54"/>
   </g>
   <text x="1310" y="${BACK_Y + BACK_H / 2 + 38}" text-anchor="middle"
-    font-family="'Noto Sans Thai',sans-serif"
-    font-size="100" font-weight="700" fill="#FFFFFF">กลับไปเมนูหลัก</text>
+    font-family="'Noto Sans Thai Bold','Noto Sans Thai',sans-serif"
+    font-size="100" fill="#FFFFFF">กลับไปเมนูหลัก</text>
 </svg>`
 }
 
