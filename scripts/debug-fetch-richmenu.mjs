@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs'
 import axios from 'axios'
+import sharp from 'sharp'
 
 // One-off diagnostic: download whatever PNG is actually live on LINE right
 // now for the given rich menu alias, so it can be compared byte-for-byte
@@ -24,3 +25,15 @@ const res = await axios.get(
 )
 writeFileSync('richmenu-live.png', res.data)
 console.log(`Saved richmenu-live.png (${res.data.length} bytes)`)
+
+// Also print a small base64 crop straight into the job log — artifact
+// downloads land on a blob-storage host that isn't always reachable, but
+// job logs go through the GitHub API, which is.
+const crop = await sharp(Buffer.from(res.data))
+  .extract({ left: 0, top: 0, width: 833, height: 620 })
+  .resize(300)
+  .png()
+  .toBuffer()
+console.log(`--- BASE64 CROP START (${crop.length} bytes) ---`)
+console.log(crop.toString('base64'))
+console.log('--- BASE64 CROP END ---')
