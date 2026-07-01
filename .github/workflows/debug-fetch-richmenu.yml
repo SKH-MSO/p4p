@@ -1,0 +1,42 @@
+name: Debug - Fetch Live Rich Menu Image
+
+# One-off manual diagnostic: downloads whatever image LINE currently serves
+# for the "month-picker" alias and uploads it as a build artifact, so it can
+# be inspected outside of the LINE app (e.g. to compare against a local
+# re-render when text looks garbled on-device).
+on:
+  workflow_dispatch:
+    inputs:
+      alias:
+        description: "Rich menu alias to fetch"
+        required: true
+        default: "month-picker"
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download live rich menu image
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+        run: node scripts/debug-fetch-richmenu.mjs "${{ inputs.alias }}"
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: richmenu-live
+          path: richmenu-live.png
+          retention-days: 3
