@@ -24,9 +24,25 @@ const ROWS   = [{ y: 0 }, { y: 620 }]
 const BACK_Y = 1240
 const BACK_H = 446  // 1240 + 446 = 1686 ✓
 
+// "Today" in Asia/Bangkok (UTC+7, no DST) — independent of the host machine's
+// timezone. GitHub Actions runners are UTC, so a run near midnight UTC would
+// otherwise resolve to the wrong Thai calendar month (e.g. 23:00 UTC on the
+// 30th is already the 1st in Bangkok).
+function bangkokYearMonth() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit',
+  }).formatToParts(new Date())
+  return {
+    year:  Number(parts.find((p) => p.type === 'year').value),
+    month: Number(parts.find((p) => p.type === 'month').value) - 1, // 0–11
+  }
+}
+
 // ── Calculate 6 months for the given JS month index (0–11) ───────────────────
-export function getMonthData(monthIndex = new Date().getMonth()) {
-  const beYear = new Date().getFullYear() + 543
+export function getMonthData(monthIndex) {
+  const { year: ceYear, month: bangkokMonth } = bangkokYearMonth()
+  if (monthIndex === undefined) monthIndex = bangkokMonth
+  const beYear = ceYear + 543
   return MONTH_ITERATOR[monthIndex].map(([mIdx, yOff]) => ({
     name:     MONTH_NAMES[mIdx],
     year:     beYear + yOff,

@@ -2,13 +2,20 @@ name: Monthly Rich Menu Month Picker Update
 
 # ── Triggers ────────────────────────────────────────────────────────────────
 on:
-  # Runs at 01:00 UTC on the 1st of every month (= 08:00 Bangkok time, UTC+7)
-  # so the LINE rich menu's month picker always includes the new month from
-  # day one, instead of waiting for someone to re-run the script by hand.
+  # Target: 06:00 Bangkok time (UTC+7) on the 1st of every month, so the LINE
+  # rich menu's month picker includes the new month first thing in the
+  # morning, instead of waiting for someone to re-run the script by hand.
+  #
+  # Cron has no "last day of month" field, and 06:00 Bangkok on the 1st is
+  # 23:00 UTC on the LAST day of the PREVIOUS month (28th–31st depending on
+  # the month) — so this fires at 23:00 UTC on days 27–31 every month, and
+  # the "Skip unless tomorrow is the 1st" step below filters out every day
+  # except the actual last day.
   schedule:
-    - cron: '0 1 1 * *'
+    - cron: '0 23 27-31 * *'
 
-  # Allow manual runs (useful for testing or catching up after an outage)
+  # Allow manual runs (useful for testing or catching up after an outage) —
+  # always runs immediately, bypassing the last-day-of-month check above.
   workflow_dispatch:
 
 jobs:
@@ -17,10 +24,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip unless tomorrow is the 1st
+        id: guard
+        run: |
+          tomorrow_day=$(date -u -d '+1 day' +%d)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$tomorrow_day" = "01" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Not the eve of a new month (tomorrow is day $tomorrow_day) — skipping."
+          fi
+
       - name: Checkout
+        if: steps.guard.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.guard.outputs.run == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -28,9 +48,11 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
         run: npm ci
 
       - name: Update month-picker rich menu
+        if: steps.guard.outputs.run == 'true'
         env:
           LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
         run: node scripts/update-month-picker.mjs
