@@ -33,4 +33,5 @@ if (res.ok) {
   console.log(`✓ sent ${ver} carousel to ${userId}`)
 } else {
   console.error('LINE API error:', JSON.stringify(body, null, 2))
+  process.exit(1)
 }
