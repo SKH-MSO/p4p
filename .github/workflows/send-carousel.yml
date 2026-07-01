@@ -1,0 +1,56 @@
+name: Send Feature Carousel
+
+# Manually send the feature-carousel Flex message.
+#
+#   mode = test       → push to a single user (LINE_USER_ID) only. SAFE default;
+#                       use this to verify images render before sending to all.
+#   mode = broadcast  → send to ALL followers of the LINE OA. Explicit opt-in.
+#
+# Uses the existing channel access token secret (LINE_ACCESS_TOKEN if set,
+# otherwise falls back to LINE_TOKEN, which the rich-menu workflows use — it's
+# the same channel's token).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test = push to your own LINE only; broadcast = send to ALL followers"
+        required: true
+        type: choice
+        default: test
+        options:
+          - test
+          - broadcast
+      version:
+        description: "Carousel release version"
+        required: true
+        default: v1
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test-send to a single user
+        if: inputs.mode == 'test'
+        env:
+          LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN || secrets.LINE_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+        run: node scripts/send-test-flex.mjs "${{ inputs.version }}"
+
+      - name: Broadcast to all followers
+        if: inputs.mode == 'broadcast'
+        env:
+          LINE_ACCESS_TOKEN: ${{ secrets.LINE_ACCESS_TOKEN || secrets.LINE_TOKEN }}
+        run: node scripts/broadcast-flex.mjs "${{ inputs.version }}"
