@@ -518,7 +518,7 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     _email_subject  : subject,
     _email_body     : body,
     _email_from     : "",
-    _email_date     : new Date().toISOString(),
+    _email_date     : emailDate,
     _source_file    : filename,
     _selected_sheet : chosenSheet,
     _all_sheets     : allSheets,

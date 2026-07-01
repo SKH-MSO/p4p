@@ -37,9 +37,12 @@ function stripFences(str) {
 /**
  * Extract and convert any year expression to a 4-digit BE year.
  * Searches in priority order: subject → body → filename (most → least reliable).
+ * Falls back to the email's received date (if provided) when no year
+ * appears in any text source — e.g. a sender who writes "เดือน มิถุนายน"
+ * but never mentions the year anywhere (subject, body, filename, or sheet).
  * Returns null if no year found.
  */
-export function resolveBeYear(filename, subject, body) {
+export function resolveBeYear(filename, subject, body, emailDate = null) {
   // Use (?<!\d) / (?!\d) instead of \b so that underscore-delimited numbers
   // in filenames like "P4P_2569_02.xlsx" are matched correctly.
   // (\b does NOT fire between _ and a digit because _ is a \w character.)
@@ -74,6 +77,14 @@ export function resolveBeYear(filename, subject, body) {
   for (const t of noBody) {
     const m = t.match(/(?<!\d)([0-3]\d)(?!\d)/);
     if (m) return 2000 + parseInt(m[1], 10) + 543;
+  }
+
+  // Tier 5 — no year mentioned anywhere: fall back to the email's received
+  // date. Submissions are near-always for the current or previous month, so
+  // the year the email arrived in is a safe last resort.
+  if (emailDate) {
+    const d = new Date(emailDate);
+    if (!isNaN(d.getTime())) return d.getFullYear() + 543;
   }
 
   return null;
@@ -677,11 +688,12 @@ export function resolveScore(rows) {
  * @returns {Promise<{ name: string, date: string, score: number }>}
  */
 export async function analyseJson(jsonData, filename = "data.json") {
-  const client  = getClient();
-  const rows    = jsonData.rows ?? [];
-  const subject = jsonData._email_subject ?? "";
-  const body    = jsonData._email_body    ?? "";
-  const file    = jsonData._source_file   ?? filename;
+  const client    = getClient();
+  const rows      = jsonData.rows ?? [];
+  const subject   = jsonData._email_subject ?? "";
+  const body      = jsonData._email_body    ?? "";
+  const file      = jsonData._source_file   ?? filename;
+  const emailDate = jsonData._email_date    ?? null;
 
   if (rows.length === 0) throw new Error("No rows to analyse.");
 
@@ -697,6 +709,10 @@ export async function analyseJson(jsonData, filename = "data.json") {
   if (!resolvedBE) {
     resolvedBE = resolveBeYearFromRows(rows);
     if (resolvedBE) console.log(`│        📅  JS year from row data: ${resolvedBE}`);
+  }
+  if (!resolvedBE && emailDate) {
+    resolvedBE = resolveBeYear(file, subject, body, emailDate);
+    if (resolvedBE) console.log(`│        📅  JS year from email received date: ${resolvedBE}`);
   }
   const yearHint   = resolvedBE
     ? `Pre-resolved BE year: ${resolvedBE}  ← USE THIS EXACT VALUE, do not recalculate.`
