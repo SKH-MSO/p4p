@@ -216,9 +216,14 @@ async function withRetry(fn, maxRetries = 7) {
       const msg     = err?.message ?? '';
       const isQuota = status === 429 || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED');
       const isServer = status >= 500 && status < 600;
-      if ((isQuota || isServer) && attempt < maxRetries) {
+      // Transient network errors (no HTTP status) — e.g. gaxios/undici under
+      // Node 24 intermittently drops the OAuth token-refresh connection with
+      // "Premature close". These are safe to retry.
+      const isNetwork = status === 0 && /premature close|terminated|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|fetch failed/i.test(msg);
+      if ((isQuota || isServer || isNetwork) && attempt < maxRetries) {
+        const kind = isQuota ? 'Quota' : isServer ? 'Server' : 'Network';
         const wait = delay + Math.random() * 1000;
-        log(`  [Retry] ${isQuota ? 'Quota' : 'Server'} — waiting ${(wait/1000).toFixed(1)}s (attempt ${attempt+1}/${maxRetries})`, 'warn');
+        log(`  [Retry] ${kind} — waiting ${(wait/1000).toFixed(1)}s (attempt ${attempt+1}/${maxRetries})`, 'warn');
         await sleep(wait);
         delay = Math.min(delay * 2, 60000);
       } else {
