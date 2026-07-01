@@ -72,7 +72,7 @@ if (alias === 'month-picker') {
 // ── Visual proof — always runs, regardless of the diff verdict above ────────
 const crop = await sharp(livePng)
   .extract({ left: 0, top: 0, width: 833, height: 620 })
-  .resize(120)
+  .resize(50)
   .grayscale()
   .png({ compressionLevel: 9 })
   .toBuffer()
