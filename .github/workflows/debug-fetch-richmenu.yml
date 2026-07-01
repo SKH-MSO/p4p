@@ -39,7 +39,9 @@ jobs:
           echo "--- glibc ---"
           ldd --version | head -1
           echo "--- resvg-js resolved packages ---"
-          find node_modules/@resvg -maxdepth 1 -name 'package.json' -exec sh -c 'echo {}; grep -E "\"name\"|\"version\"" {}' \;
+          find node_modules/@resvg -maxdepth 2 -name 'package.json' -exec sh -c 'echo {}; grep -E "\"name\"|\"version\"" {}' \;
+          echo "--- resvg native binding actually loaded at runtime ---"
+          node -e "const p=require('@resvg/resvg-js'); console.log(Object.keys(p))"
           echo "--- fontconfig / system fonts (should be irrelevant since loadSystemFonts:false, but checking anyway) ---"
           fc-list 2>&1 | grep -i thai || echo "no system Thai fonts found (or fc-list unavailable)"
           echo "--- font file hashes ---"
