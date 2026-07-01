@@ -60,6 +60,12 @@ const handleEvent = async (event) => {
       "messages": [createStatusList()]
     })
   }
+  if (message === "myid") {
+    return client.replyMessage({
+      "replyToken": event.replyToken,
+      "messages": [{ "type": "text", "text": event.source.userId }]
+    })
+  }
   return Promise.resolve(null)
 }
 
