@@ -129,11 +129,14 @@ begin
 end $$;
 
 -- One-time seed: pull every email we already know from past senders so the
--- directory isn't empty on day one. Idempotent (on conflict do nothing).
+-- directory isn't empty on day one. Only MATCHED senders (matched = true) are
+-- seeded — an unmatched sender is just someone who emailed the P4P inbox and
+-- could not be tied to a physician, so they must not be auto-allow-listed.
+-- Idempotent (on conflict do nothing).
 insert into public.physician_directory (email, full_name, department)
 select distinct lower(m.sender_email), m.matched_physician, m.department
 from public.sender_physician_match m
-where m.sender_email is not null
+where m.sender_email is not null and m.matched
 on conflict (email) do nothing;
 
 
@@ -155,8 +158,10 @@ as $$
     select 1 from public.physician_directory d
     where lower(d.email) = lower(p_email) and d.active
   ) or exists (
+    -- MATCHED senders only: an unmatched sender is a stranger who emailed the
+    -- P4P inbox, not a verified physician, and must not be allow-listed.
     select 1 from public.sender_physician_match m
-    where lower(m.sender_email) = lower(p_email)
+    where lower(m.sender_email) = lower(p_email) and m.matched
   );
 $$;
 
