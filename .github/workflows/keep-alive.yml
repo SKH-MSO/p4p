@@ -18,4 +18,4 @@ jobs:
         # Use curl to make a request to an API endpoint that queries your database
         # Replace the URL with one of your project's API endpoints
         run: |
-          curl -I ${{ secrets.SUPABASE_API_URL }}
+          curl -I ${{ secrets.SUPABASE_URL }}
