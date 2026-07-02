@@ -186,6 +186,35 @@ export async function logSubmission({ physicianName, department, workMonth, subm
 }
 
 /**
+ * Upsert one sender → physician match result into sender_physician_match.
+ * Replaces the sender-physician-match.csv file previously committed to the repo.
+ */
+export async function saveSenderMatch({
+  senderEmail, senderDisplayName, emailCount,
+  extractedName, nameSource, matchedPhysician, department, similarity, matched,
+}) {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("sender_physician_match")
+    .upsert(
+      {
+        sender_email        : senderEmail,
+        sender_display_name : senderDisplayName ?? null,
+        email_count         : emailCount,
+        extracted_name      : extractedName || null,
+        name_source         : nameSource,
+        matched_physician   : matchedPhysician || null,
+        department          : department || null,
+        similarity          : Number(similarity),
+        matched             : matched === "yes" || matched === true,
+        updated_at          : new Date().toISOString(),
+      },
+      { onConflict: "sender_email" }
+    );
+  if (error) throw new Error(`sender_physician_match upsert error: ${error.message}`);
+}
+
+/**
  * Update the score column for a specific row identified by its primary key.
  *
  * @param {string}        date          Table name, e.g. "2569_02"

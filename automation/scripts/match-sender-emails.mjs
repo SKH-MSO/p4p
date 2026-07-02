@@ -8,32 +8,27 @@
  *   3. Fuzzy-match the name against all YYYY_MM Supabase roster tables
  *
  * Groups messages by sender email — stops trying once a confident match is found.
- * Writes (overwrites) sender-physician-match.csv.
+ * Upserts results into the sender_physician_match Supabase table (one row per
+ * sender_email; see sql/sender_physician_match.sql for the table definition).
  *
  * Environment variables:
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
  *   SUPABASE_URL, SUPABASE_KEY
- *   OUTPUT_PATH  (default: $GITHUB_WORKSPACE/sender-physician-match.csv or ../sender-physician-match.csv)
  */
 
 import { google }        from "googleapis";
 import { createClient }  from "@supabase/supabase-js";
-import { writeFileSync } from "fs";
 import ExcelJS           from "exceljs";
 import { config as dotenvConfig } from "dotenv";
 
 import { createGmailClient }                                       from "../gmail-client.js";
 import { resolvePhysicianName, resolvePhysicianNameFromSheet }     from "../claude-analyst.js";
-import { matchName }                                               from "../supabase-client.js";
+import { matchName, saveSenderMatch }                               from "../supabase-client.js";
 import { MONTH_TOKENS_BY_NUM }                                     from "../months.js";
 
 dotenvConfig({ override: true });
 
-const LABEL_NAME  = "เอกสาร P4P";
-const OUTPUT_PATH = process.env.OUTPUT_PATH
-  ?? (process.env.GITHUB_WORKSPACE
-      ? `${process.env.GITHUB_WORKSPACE}/sender-physician-match.csv`
-      : "../sender-physician-match.csv");
+const LABEL_NAME = "เอกสาร P4P";
 
 // ── Parse "Display Name <email@host>" or bare "email@host" ───────────────────
 function parseFrom(header) {
@@ -166,10 +161,6 @@ async function tryMessage(gmailClient, rawGmail, msgId, tables) {
   return null; // could not resolve
 }
 
-// ── CSV helpers ───────────────────────────────────────────────────────────────
-function csvCell(v) { return `"${String(v ?? "").replace(/"/g, '""')}"`; }
-function csvRow(cols, obj) { return cols.map(c => csvCell(obj[c])).join(","); }
-
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log(`\n${"═".repeat(60)}`);
@@ -227,11 +218,6 @@ async function main() {
 
   // ── Step 5: match each sender ─────────────────────────────────────────────
   console.log("🔍  Matching senders…\n");
-  const COLS = [
-    "sender_email", "sender_display_name", "email_count",
-    "extracted_name", "name_source",
-    "matched_physician", "department", "similarity", "matched",
-  ];
   const results = [];
 
   let done = 0;
@@ -251,49 +237,30 @@ async function main() {
       }
     }
 
-    if (result) {
-      console.log(`✅ ${result.hit.matchedName} (${(result.hit.similarity * 100).toFixed(0)}%)`);
-      results.push({
-        sender_email      : email,
-        sender_display_name: displayName,
-        email_count       : messageIds.length,
-        extracted_name    : result.extractedName,
-        name_source       : result.source,
-        matched_physician : result.hit.matchedName,
-        department        : result.hit.department,
-        similarity        : result.hit.similarity.toFixed(3),
-        matched           : "yes",
-      });
-    } else {
-      console.log("—");
-      results.push({
-        sender_email      : email,
-        sender_display_name: displayName,
-        email_count       : messageIds.length,
-        extracted_name    : "",
-        name_source       : "none",
-        matched_physician : "",
-        department        : "",
-        similarity        : "0.000",
-        matched           : "no",
-      });
-    }
+    const senderMatch = result
+      ? {
+          senderEmail: email, senderDisplayName: displayName, emailCount: messageIds.length,
+          extractedName: result.extractedName, nameSource: result.source,
+          matchedPhysician: result.hit.matchedName, department: result.hit.department,
+          similarity: result.hit.similarity.toFixed(3), matched: "yes",
+        }
+      : {
+          senderEmail: email, senderDisplayName: displayName, emailCount: messageIds.length,
+          extractedName: "", nameSource: "none",
+          matchedPhysician: "", department: "", similarity: "0.000", matched: "no",
+        };
+
+    if (result) console.log(`✅ ${result.hit.matchedName} (${(result.hit.similarity * 100).toFixed(0)}%)`);
+    else        console.log("—");
+
+    await saveSenderMatch(senderMatch);
+    results.push(senderMatch);
   }
-
-  // Sort: matched first, then by similarity desc
-  results.sort((a, b) => {
-    if (a.matched !== b.matched) return a.matched === "yes" ? -1 : 1;
-    return parseFloat(b.similarity) - parseFloat(a.similarity);
-  });
-
-  // ── Step 6: write CSV (always overwrite) ──────────────────────────────────
-  const lines = [COLS.join(","), ...results.map(r => csvRow(COLS, r))];
-  writeFileSync(OUTPUT_PATH, lines.join("\n") + "\n", "utf8");
 
   const matchedCount = results.filter(r => r.matched === "yes").length;
   console.log(`\n${"═".repeat(60)}`);
   console.log(`  ✅  ${matchedCount} matched  /  ${results.length} total senders`);
-  console.log(`  📄  CSV → ${OUTPUT_PATH}`);
+  console.log(`  📄  Upserted into sender_physician_match`);
   console.log(`${"═".repeat(60)}\n`);
 }
 
