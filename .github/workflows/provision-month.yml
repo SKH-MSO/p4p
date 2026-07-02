@@ -1,0 +1,74 @@
+name: Provision Monthly Roster Table
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+on:
+  # Target: 01:00 Asia/Bangkok (UTC+7) on the 1st of every month, so the new
+  # month's roster table exists before anyone submits P4P for it.
+  #
+  # GitHub cron is UTC and has no "last day of month" field. 01:00 Bangkok on
+  # the 1st is 18:00 UTC on the LAST day of the PREVIOUS month (28th–31st).
+  # So this fires at 18:00 UTC on days 28–31, and the "Skip unless tomorrow is
+  # the 1st" guard below drops every day except the actual last day of the
+  # month. (Same trick as update-month-picker.yml.)
+  schedule:
+    - cron: '0 18 28-31 * *'
+
+  # Manual runs bypass the guard. Leave inputs blank to provision
+  # the current Bangkok month from last month; set them to backfill/repair a
+  # specific month (e.g. new_key=2569_08, old_key=2569_07).
+  workflow_dispatch:
+    inputs:
+      new_key:
+        description: "New month key to create (blank = current Bangkok month), e.g. 2569_08"
+        required: false
+        default: ""
+      old_key:
+        description: "Month to copy from (blank = previous month), e.g. 2569_07"
+        required: false
+        default: ""
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Skip unless tomorrow is the 1st
+        id: guard
+        run: |
+          tomorrow_day=$(date -u -d '+1 day' +%d)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$tomorrow_day" = "01" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Not the eve of a new month (tomorrow is day $tomorrow_day) — skipping."
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: npm ci
+
+      - name: Provision new month table
+        if: steps.guard.outputs.run == 'true'
+        env:
+          SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          NEW_KEY:            ${{ inputs.new_key }}
+          OLD_KEY:            ${{ inputs.old_key }}
+        run: node scripts/provision-next-month.mjs
