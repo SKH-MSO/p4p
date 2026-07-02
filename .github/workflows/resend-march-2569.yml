@@ -1,0 +1,40 @@
+name: P4P Resend March 2569 (one-off)
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+on:
+  # Manual only — this is a one-off resend, not a recurring job.
+  workflow_dispatch:
+
+# ── Job ─────────────────────────────────────────────────────────────────────
+jobs:
+  resend-march:
+    name: Resend March 2569 (2569_03) status to all dept heads
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run one-off resend
+        env:
+          GOOGLE_CLIENT_ID:     ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          DEPT_HEADS_JSON:      ${{ secrets.DEPT_HEADS_JSON }}
+          P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
+        run: node scripts/resend-month.mjs
