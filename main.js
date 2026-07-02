@@ -29,6 +29,7 @@ const {
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))
 app.use("/ranking", express.static("ranking"))
+app.use("/verify", express.static("verify"))
 app.use("/assets", express.static("assets"))
 
 app.post("/line", line.middleware(config), (req, res) => {

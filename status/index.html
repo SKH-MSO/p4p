@@ -361,9 +361,10 @@
     <!-- Supabase JS client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js" integrity="sha384-K0oxqktRvaThvYgGL4G+OK2Ih6VS6Uyu7j3+7WJgp/uWM0Yv6Xi4YEiw0BB+mPfi" crossorigin="anonymous"></script>
     <script src="/assets/shared.js"></script>
+    <script src="/assets/auth-guard.js"></script>
     <script>
-        // ── Supabase (config + helpers from /assets/shared.js) ────────────────
-        const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY)
+        // ── Supabase (client + verification gate from /assets/auth-guard.js) ──
+        const db = P4P.db
 
         // ── URL params ────────────────────────────────────────────────────────
         const queryString   = decodeURIComponent(window.location.search).replace("?liff.state=", "")
@@ -635,7 +636,9 @@
             }
         }
 
-        main()
+        // Only load data once the verification gate confirms a valid session
+        // (P4P.ready never resolves when unverified — it redirects to /verify/).
+        P4P.ready.then(() => main())
     </script>
 </body>
 

@@ -317,9 +317,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js" integrity="sha384-K0oxqktRvaThvYgGL4G+OK2Ih6VS6Uyu7j3+7WJgp/uWM0Yv6Xi4YEiw0BB+mPfi" crossorigin="anonymous"></script>
     <script src="/assets/shared.js"></script>
+    <script src="/assets/auth-guard.js"></script>
     <script>
-        // Supabase config + helpers come from /assets/shared.js
-        const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY)
+        // Supabase client + verification gate come from /assets/auth-guard.js
+        const db = P4P.db
 
         const THAI_MONTHS_SHORT = P4P.THAI_MONTHS_SHORT
         const CLOCK_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M12 7v5l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -453,16 +454,20 @@
             }
         }
 
-        const _block = document.getElementById("desktop-block")
-        if (/Line\//i.test(navigator.userAgent)) {
-            loadMonth(months[0])
-        } else if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-            _block.querySelector("h2").textContent = "กรุณาเปิดผ่าน LINE application"
-            _block.querySelector("p").textContent  = "ขอบคุณสำหรับความร่วมมือ"
-            _block.style.display = "flex"
-        } else {
-            _block.style.display = "flex"
-        }
+        // Only load data once the verification gate confirms a valid session
+        // (P4P.ready never resolves when unverified — it redirects to /verify/).
+        P4P.ready.then(() => {
+            const _block = document.getElementById("desktop-block")
+            if (/Line\//i.test(navigator.userAgent)) {
+                loadMonth(months[0])
+            } else if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+                _block.querySelector("h2").textContent = "กรุณาเปิดผ่าน LINE application"
+                _block.querySelector("p").textContent  = "ขอบคุณสำหรับความร่วมมือ"
+                _block.style.display = "flex"
+            } else {
+                _block.style.display = "flex"
+            }
+        })
     </script>
 </body>
 
