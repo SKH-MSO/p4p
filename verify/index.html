@@ -264,15 +264,19 @@
             if (!email) return
             busy(emailSubmit, true, "กำลังส่ง...")
             try {
-                // Only allow-listed physicians (present in sender_physician_match)
-                // may proceed. Checked via a SECURITY DEFINER RPC that returns just
-                // a boolean, so the email list itself is never exposed.
+                // Only allow-listed physicians (in physician_directory or
+                // sender_physician_match) may proceed. Checked via a SECURITY
+                // DEFINER RPC that returns just a boolean, so the email list is
+                // never exposed.
                 const { data: allowed, error: rpcErr } =
                     await db.rpc("is_sender_allowlisted", { p_email: email })
                 if (rpcErr) throw rpcErr
                 if (!allowed) {
+                    // Not on the list yet — log the attempt so an admin can add
+                    // this physician to the directory, and tell them it's pending.
+                    await db.rpc("log_access_request", { p_email: email })
                     busy(emailSubmit, false, "ส่งรหัสยืนยัน")
-                    showError("ไม่พบอีเมลนี้ในระบบ กรุณาใช้อีเมลที่ท่านใช้ส่ง P4P")
+                    showError("อีเมลนี้ยังไม่ได้ลงทะเบียน ระบบได้บันทึกคำขอแล้ว ผู้ดูแลจะเพิ่มให้ท่านเร็ว ๆ นี้")
                     return
                 }
 

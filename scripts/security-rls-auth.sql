@@ -37,18 +37,77 @@
 --    3. Run THIS file in the Supabase SQL editor to lock reads to authenticated
 --       + allow-listed. (Running it before step 2 would lock out the live site.)
 --
+--  Onboarding new physicians (who haven't submitted P4P yet)
+--  ----------------------------------------------------------
+--  The allow-list is  physician_directory  UNION  sender_physician_match. A new
+--  physician has no row in sender_physician_match until their first submission,
+--  so add them to physician_directory (Supabase Table Editor → new row: email,
+--  full_name, department) and they can verify immediately. If a physician tries
+--  an email that isn't allow-listed, /verify/ records it in access_requests —
+--  check that table (resolved = false) to see who still needs adding.
+--
 --  Verify (with the PUBLIC key, i.e. anon — everything should now be denied):
 --    curl '.../rest/v1/2569_06?select=firstname'  -H "apikey:<pub>"   # -> [] / error
 --  With a valid user JWT in Authorization: Bearer <jwt>, the same query returns
---  rows only if that user's email is in sender_physician_match.
+--  rows only if that user's email is in physician_directory or
+--  sender_physician_match.
 --
 --  All blocks are idempotent.
 -- ============================================================================
 
 
 -- ----------------------------------------------------------------------------
--- Block 0 — allow-list helpers (SECURITY DEFINER so they can read
---           sender_physician_match without granting anyone SELECT on it).
+-- Block 0a — physician directory + access requests
+--
+--   physician_directory is an ADMIN-MAINTAINED allow-list, independent of who
+--   has emailed. New physicians are added here (one row, via the Supabase Table
+--   Editor) so they can verify BEFORE their first P4P submission. It is a
+--   standalone table — NOT a column on the YYYY_MM roster tables, which are
+--   recreated every month and would lose the emails on each import.
+--
+--   The effective allow-list is:  physician_directory  UNION  sender_physician_match
+--   so everyone who has already emailed keeps working with no migration.
+--
+--   access_requests logs verify attempts from emails that are NOT allow-listed,
+--   so admins can see who tried and needs adding. It is NOT an approval gate —
+--   just visibility, so a real physician is never silently stuck.
+--
+--   Both tables hold email addresses, so they are locked down completely: no
+--   anon/authenticated SELECT. They are only reachable via the SECURITY DEFINER
+--   functions below (and the service_role key in the dashboard).
+-- ----------------------------------------------------------------------------
+create table if not exists public.physician_directory (
+  email       text primary key,
+  full_name   text,
+  department  text,
+  active      boolean     not null default true,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists public.access_requests (
+  email          text primary key,
+  requested_at   timestamptz not null default now(),
+  request_count  integer     not null default 1,
+  resolved       boolean     not null default false
+);
+
+alter table public.physician_directory enable row level security;
+alter table public.access_requests     enable row level security;
+revoke all on public.physician_directory from anon, authenticated;
+revoke all on public.access_requests     from anon, authenticated;
+
+-- One-time seed: pull every email we already know from past senders so the
+-- directory isn't empty on day one. Idempotent (on conflict do nothing).
+insert into public.physician_directory (email, full_name, department)
+select distinct lower(m.sender_email), m.matched_physician, m.department
+from public.sender_physician_match m
+where m.sender_email is not null
+on conflict (email) do nothing;
+
+
+-- ----------------------------------------------------------------------------
+-- Block 0b — allow-list helpers (SECURITY DEFINER so they can read the
+--           directory + sender_physician_match without granting SELECT on them).
 -- ----------------------------------------------------------------------------
 
 -- Used by /verify/ BEFORE login: "is this email allowed to request a code?"
@@ -61,6 +120,9 @@ stable
 set search_path = public
 as $$
   select exists (
+    select 1 from public.physician_directory d
+    where lower(d.email) = lower(p_email) and d.active
+  ) or exists (
     select 1 from public.sender_physician_match m
     where lower(m.sender_email) = lower(p_email)
   );
@@ -74,16 +136,31 @@ security definer
 stable
 set search_path = public
 as $$
-  select exists (
-    select 1 from public.sender_physician_match m
-    where lower(m.sender_email) = lower(auth.jwt() ->> 'email')
-  );
+  select public.is_sender_allowlisted(auth.jwt() ->> 'email');
 $$;
 
-revoke all on function public.is_sender_allowlisted(text) from public;
+-- Called by /verify/ when an email is NOT allow-listed: record the attempt so
+-- an admin can add the physician to the directory. Never reveals anything.
+create or replace function public.log_access_request(p_email text)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into public.access_requests (email, requested_at, request_count, resolved)
+  values (lower(p_email), now(), 1, false)
+  on conflict (email) do update
+    set requested_at  = now(),
+        request_count = access_requests.request_count + 1,
+        resolved      = false;
+$$;
+
+revoke all on function public.is_sender_allowlisted(text)   from public;
 revoke all on function public.is_current_user_allowlisted() from public;
+revoke all on function public.log_access_request(text)      from public;
 grant execute on function public.is_sender_allowlisted(text) to anon, authenticated;
 grant execute on function public.is_current_user_allowlisted() to authenticated;
+grant execute on function public.log_access_request(text)    to anon, authenticated;
 
 
 -- ----------------------------------------------------------------------------
@@ -114,6 +191,7 @@ begin
       and tablename ~ '^[0-9]{4}_[0-9]{2}$'
   loop
     execute format('alter table public.%I enable row level security;', t);
+    execute format('alter table public.%I add column if not exists submitted_at timestamptz;', t);
     execute format('drop policy if exists "anon read roster" on public.%I;', t);
     execute format('drop policy if exists "verified read roster" on public.%I;', t);
     execute format('create policy "verified read roster" on public.%I for select to authenticated using (public.is_current_user_allowlisted());', t);
