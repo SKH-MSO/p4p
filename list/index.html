@@ -408,6 +408,7 @@ const isMobile = () => window.innerWidth <= 481;
 async function loadData() {
   const table = document.getElementById('monthSelect').value;
   if (!table) return;
+  await P4P.ready;   // don't query until the verification gate has a valid session
   const myToken = ++loadToken;
   const meta = getMonthMeta(table);
 

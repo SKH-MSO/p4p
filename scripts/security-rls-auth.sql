@@ -59,6 +59,15 @@
 --  an email that isn't allow-listed, /verify/ records it in access_requests —
 --  check that table (resolved = false) to see who still needs adding.
 --
+--  Revoking access: add the email to blocked_emails (Table Editor). It overrides
+--  BOTH allow-list branches, so it revokes a matched sender or a directory entry
+--  without deleting their data. To restore, delete the blocked_emails row.
+--
+--  OPTIONAL server-side signup enforcement: scripts/auth-hook-restrict-signups.sql
+--  is a (verify-before-enabling) template for a Supabase "Before User Created"
+--  hook that rejects non-allow-listed emails at signup, stopping OTP spam and
+--  auth.users pollution. RLS already protects the DATA; that hook is hardening.
+--
 --  Verify (with the PUBLIC key, i.e. anon — everything should now be denied):
 --    curl '.../rest/v1/2569_06?select=firstname'  -H "apikey:<pub>"   # -> [] / error
 --  With a valid user JWT in Authorization: Bearer <jwt>, the same query returns
@@ -104,10 +113,22 @@ create table if not exists public.access_requests (
   resolved       boolean     not null default false
 );
 
+-- Denylist / revocation. Directory rows can be disabled via active=false, but a
+-- MATCHED sender (in sender_physician_match) has no such switch — deleting their
+-- row would lose data. Add an email here to revoke access for ANY email, matched
+-- sender or directory entry alike; it overrides both allow-list branches.
+create table if not exists public.blocked_emails (
+  email       text primary key,
+  reason      text,
+  blocked_at  timestamptz not null default now()
+);
+
 alter table public.physician_directory enable row level security;
 alter table public.access_requests     enable row level security;
+alter table public.blocked_emails       enable row level security;
 revoke all on public.physician_directory from anon, authenticated;
 revoke all on public.access_requests     from anon, authenticated;
+revoke all on public.blocked_emails       from anon, authenticated;
 
 -- CRITICAL — lock the tables the allow-list is built from.
 --   sender_physician_match holds physician emails+names and, because the
@@ -154,14 +175,20 @@ security definer
 stable
 set search_path = public
 as $$
-  select exists (
-    select 1 from public.physician_directory d
-    where lower(d.email) = lower(p_email) and d.active
-  ) or exists (
-    -- MATCHED senders only: an unmatched sender is a stranger who emailed the
-    -- P4P inbox, not a verified physician, and must not be allow-listed.
-    select 1 from public.sender_physician_match m
-    where lower(m.sender_email) = lower(p_email) and m.matched
+  -- Denylist wins over everything (revocation).
+  select not exists (
+    select 1 from public.blocked_emails b
+    where lower(b.email) = lower(p_email)
+  ) and (
+    exists (
+      select 1 from public.physician_directory d
+      where lower(d.email) = lower(p_email) and d.active
+    ) or exists (
+      -- MATCHED senders only: an unmatched sender is a stranger who emailed the
+      -- P4P inbox, not a verified physician, and must not be allow-listed.
+      select 1 from public.sender_physician_match m
+      where lower(m.sender_email) = lower(p_email) and m.matched
+    )
   );
 $$;
 
