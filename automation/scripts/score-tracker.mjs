@@ -43,6 +43,11 @@ const THAI_MONTHS = {
   "05":"พฤษภาคม","06":"มิถุนายน","07":"กรกฎาคม","08":"สิงหาคม",
   "09":"กันยายน","10":"ตุลาคม","11":"พฤศจิกายน","12":"ธันวาคม",
 };
+const THAI_MONTHS_SHORT = {
+  "01":"ม.ค.","02":"ก.พ.","03":"มี.ค.","04":"เม.ย.",
+  "05":"พ.ค.","06":"มิ.ย.","07":"ก.ค.","08":"ส.ค.",
+  "09":"ก.ย.","10":"ต.ค.","11":"พ.ย.","12":"ธ.ค.",
+};
 
 // ── Date helpers ───────────────────────────────────────────────────────────
 function getPreviousMonths(count) {
@@ -60,6 +65,23 @@ function getPreviousMonths(count) {
 function tableKeyToDisplay(key) {
   const [year, month] = key.split("_");
   return `${THAI_MONTHS[month] ?? month} ${year}`;
+}
+
+// monthKeys ordered most-recent-first (as returned by getPreviousMonths) →
+// abbreviated range, oldest to newest, e.g. "เม.ย. - มิ.ย. 69" (or
+// "ธ.ค. 68 - ก.พ. 69" when the window crosses a BE year boundary).
+function monthRangeShortLabel(monthKeys) {
+  const oldest = monthKeys[monthKeys.length - 1];
+  const newest = monthKeys[0];
+  const [oldYear, oldMonth] = oldest.split("_");
+  const [newYear, newMonth] = newest.split("_");
+  const oldLabel = THAI_MONTHS_SHORT[oldMonth] ?? oldMonth;
+  const newLabel = THAI_MONTHS_SHORT[newMonth] ?? newMonth;
+  const oldYY = oldYear.slice(-2);
+  const newYY = newYear.slice(-2);
+  return oldYear === newYear
+    ? `${oldLabel} - ${newLabel} ${newYY}`
+    : `${oldLabel} ${oldYY} - ${newLabel} ${newYY}`;
 }
 
 function todayThaiStr() {
@@ -196,6 +218,7 @@ async function main() {
 
   // ── Phase 3: send one email per unique address ──────────────────────────
   const summaryRows = [];
+  const monthRangeLabel = monthRangeShortLabel(months);
 
   for (const [email, deptList] of byEmail) {
     const deptNames = deptList.map(d => d.dept).join(", ");
@@ -211,7 +234,7 @@ async function main() {
       reportDate: todayStr,
     });
 
-    const subject   = `รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} — ${todayStr}`;
+    const subject   = `รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthRangeLabel}`;
     const plainBody = `รายงานคะแนน P4P\nกลุ่มงาน: ${deptNames}`;
 
     await gmail.sendMessage({ to: email, subject, body: plainBody, html });
