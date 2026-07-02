@@ -48,9 +48,46 @@
             btn.innerHTML = on ? '<span class="spinner"></span>' + label : label
         }
 
-        // Already verified? Skip straight to the page they wanted.
+        // ── Pending-email persistence ─────────────────────────────────────────
+        // To read the OTP the user must leave LINE for their email app and come
+        // back. If the in-app browser reloads the page during that round-trip,
+        // restore the code-entry step instead of dropping them at step 1.
+        const PENDING_KEY = "p4p_verify_pending"
+        const PENDING_TTL = 15 * 60 * 1000 // 15 min — after this the OTP is likely dead
+        const savePending  = (email) => {
+            try { localStorage.setItem(PENDING_KEY, JSON.stringify({ email, ts: Date.now() })) } catch (e) { /* storage blocked */ }
+        }
+        const clearPending = () => {
+            try { localStorage.removeItem(PENDING_KEY) } catch (e) { /* storage blocked */ }
+        }
+        const readPending  = () => {
+            try {
+                const p = JSON.parse(localStorage.getItem(PENDING_KEY) || "null")
+                if (p && p.email && Date.now() - p.ts < PENDING_TTL) return p.email
+            } catch (e) { /* ignore */ }
+            clearPending()
+            return null
+        }
+
+        // Switch to the code-entry step for a given email (after sending, or on
+        // restore after a reload).
+        const goToCodeStep = (email) => {
+            currentEmail = email
+            sentTo.textContent = email
+            emailStep.classList.add("hidden")
+            codeStep.classList.remove("hidden")
+            codeInput.focus()
+        }
+
+        // Already verified? Skip straight to the page they wanted. Otherwise, if a
+        // verification was in progress before a reload, restore the code step.
         db.auth.getSession().then(({ data }) => {
-            if (data.session) location.replace(RETURN_TO)
+            if (data.session) { location.replace(RETURN_TO); return }
+            const pendingEmail = readPending()
+            if (pendingEmail) {
+                goToCodeStep(pendingEmail)
+                showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
+            }
         })
 
         // ── Step 1 — request an OTP ───────────────────────────────────────────
@@ -83,13 +120,10 @@
                 })
                 if (error) throw error
 
-                currentEmail = email
-                sentTo.textContent = email
-                emailStep.classList.add("hidden")
-                codeStep.classList.remove("hidden")
+                savePending(email)      // survive an in-app-browser reload
+                goToCodeStep(email)
                 busy(emailSubmit, false, "ส่งรหัสยืนยัน")
                 showOk("ส่งรหัสยืนยันแล้ว กรุณาตรวจสอบอีเมลของท่าน")
-                codeInput.focus()
             } catch (err) {
                 console.error(err)
                 busy(emailSubmit, false, "ส่งรหัสยืนยัน")
@@ -114,6 +148,7 @@
                     type: "email",
                 })
                 if (error) throw error
+                clearPending()
                 showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
                 location.replace(RETURN_TO)
             } catch (err) {
@@ -125,6 +160,7 @@
 
         // ── Back to email step ────────────────────────────────────────────────
         backBtn.addEventListener("click", () => {
+            clearPending()
             clearMsg()
             codeStep.classList.add("hidden")
             emailStep.classList.remove("hidden")
