@@ -49,6 +49,7 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;") // also safe inside single-quoted attributes
   }
 
   global.P4P = {
