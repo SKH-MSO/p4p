@@ -5,3 +5,7 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Contains real physician PII — data now lives in the Supabase
+# sender_physician_match table instead (see automation/sql/).
+sender-physician-match.csv
