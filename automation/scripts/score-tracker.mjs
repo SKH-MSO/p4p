@@ -68,6 +68,16 @@ function todayThaiStr() {
   return `${d.getDate()} ${THAI_MONTHS[m]} ${d.getFullYear() + 543}`;
 }
 
+// This workflow runs on GitHub Actions in a PUBLIC repo — never print or
+// persist a full recipient address to console/$GITHUB_STEP_SUMMARY, both of
+// which are publicly readable job output.
+function maskEmail(email) {
+  const [user, domain] = String(email ?? "").split("@");
+  if (!domain) return "***";
+  const masked = user.length <= 2 ? `${user[0] ?? "*"}*` : `${user[0]}${"*".repeat(user.length - 2)}${user.slice(-1)}`;
+  return `${masked}@${domain}`;
+}
+
 // ── Supabase helpers ───────────────────────────────────────────────────────
 function createSB() {
   const { SUPABASE_URL, SUPABASE_KEY } = process.env;
@@ -189,7 +199,7 @@ async function main() {
 
   for (const [email, deptList] of byEmail) {
     const deptNames = deptList.map(d => d.dept).join(", ");
-    console.log(`\n📧  ${email}`);
+    console.log(`\n📧  ${maskEmail(email)}`);
     console.log(`    กลุ่มงาน: ${deptNames}`);
 
     // Build combined HTML email
@@ -201,14 +211,14 @@ async function main() {
       reportDate: todayStr,
     });
 
-    const subject   = `รายงานสถานะ P4P ${deptNames} — ${todayStr}`;
-    const plainBody = `รายงานสถานะ P4P\nกลุ่มงาน: ${deptNames}`;
+    const subject   = `รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} — ${todayStr}`;
+    const plainBody = `รายงานคะแนน P4P\nกลุ่มงาน: ${deptNames}`;
 
     await gmail.sendMessage({ to: email, subject, body: plainBody, html });
     console.log(`    ✉️  ส่งแล้ว`);
 
     for (const { dept } of deptList) {
-      summaryRows.push({ dept, emailed: true, note: email });
+      summaryRows.push({ dept, emailed: true, note: "ส่งแล้ว" });
     }
   }
 

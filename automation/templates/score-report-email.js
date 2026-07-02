@@ -20,8 +20,12 @@
  *     }>
  *   }
  * @param {string} data.reportDate   Thai date string (e.g. "1 มิถุนายน 2569")
+ * @param {string} [data.intro]      Override for the intro paragraph. Defaults
+ *                                   to the standard 3-month wording — pass this
+ *                                   for one-off reports covering a different scope.
  */
-export function buildScoreReportEmail({ depts, reportDate }) {
+export function buildScoreReportEmail({ depts, reportDate, intro }) {
+  const introText = intro ?? "ระบบได้รวบรวมสถานะการส่งคะแนน P4P ของ 3 เดือนล่าสุดแล้ว กดชื่อแพทย์เพื่อเปิดไฟล์ Excel บน Google Drive";
 
   const driveLink = (id) => `https://drive.google.com/file/d/${id}/view`;
 
@@ -138,7 +142,7 @@ export function buildScoreReportEmail({ depts, reportDate }) {
   <div class="body">
     <p class="greeting">เรียน หัวหน้ากลุ่มงาน</p>
     <p class="intro">
-      ระบบได้รวบรวมสถานะการส่งคะแนน P4P ของ 3 เดือนล่าสุดแล้ว กดชื่อแพทย์เพื่อเปิดไฟล์ Excel บน Google Drive
+      ${introText}
     </p>
 
     ${deptSections}
