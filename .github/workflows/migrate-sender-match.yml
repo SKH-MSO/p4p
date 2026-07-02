@@ -1,0 +1,35 @@
+name: P4P Migrate sender-physician-match.csv (one-off)
+
+# ── Triggers ────────────────────────────────────────────────────────────────
+on:
+  # Manual only — this is a one-off migration, not a recurring job.
+  workflow_dispatch:
+
+# ── Job ─────────────────────────────────────────────────────────────────────
+jobs:
+  migrate-sender-match:
+    name: Migrate sender-physician-match.csv into Supabase
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migration
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node scripts/migrate-sender-match.mjs
