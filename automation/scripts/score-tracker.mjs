@@ -13,10 +13,11 @@
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
  *   SUPABASE_URL, SUPABASE_KEY
- *   DEPT_HEADS_JSON   — JSON object: dept name → head email (null = no email)
- *                       Keys must match the department values in Supabase exactly
- *                       (script trims whitespace when matching).
- *                       Example: {"ศัลยกรรม":"dr@h.com","เวชกรรมฟื้นฟู":null}
+ *
+ * Department → head email comes from the Supabase dept_heads table (RLS
+ * locked to service_role — see sql/dept_heads.sql), not a GitHub secret:
+ * heads change often, and secrets are write-only, so a table you can read
+ * and edit a single row of beats re-pasting a whole JSON blob each time.
  */
 
 import { createClient }          from "@supabase/supabase-js";
@@ -25,15 +26,11 @@ import { appendFileSync }        from "fs";
 import { createGmailClient }     from "../gmail-client.js";
 import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
+import { getDeptHeads }          from "../supabase-client.js";
 
 dotenvConfig({ override: true });
 
 // ── Configuration ─────────────────────────────────────────────────────────
-// Dept names are trimmed at lookup time so trailing spaces in the JSON don't matter.
-const DEPT_HEADS = (() => {
-  try { return JSON.parse(process.env.DEPT_HEADS_JSON || "{}"); }
-  catch (e) { console.warn("⚠️  Could not parse DEPT_HEADS_JSON:", e.message); return {}; }
-})();
 const EXEMPT_DEPTS = new Set(["INTERN"]);
 const CHECK_COUNT  = 3;
 
@@ -180,9 +177,10 @@ async function main() {
   console.log(`  Checking last ${CHECK_COUNT} months`);
   console.log(`${"═".repeat(62)}\n`);
 
-  const months = getPreviousMonths(CHECK_COUNT);
-  const sb     = createSB();
-  const gmail  = createGmailClient();
+  const months     = getPreviousMonths(CHECK_COUNT);
+  const sb         = createSB();
+  const gmail      = createGmailClient();
+  const DEPT_HEADS = await getDeptHeads();
 
   console.log(`📅  Months: ${months.map(tableKeyToDisplay).join("  •  ")}\n`);
 

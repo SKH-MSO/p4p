@@ -186,6 +186,20 @@ export async function logSubmission({ physicianName, department, workMonth, subm
 }
 
 /**
+ * Fetch the department → head email map from the dept_heads table.
+ * Replaces the DEPT_HEADS_JSON GitHub secret — this is readable/editable
+ * (Supabase Table Editor or SQL) instead of write-only, and heads change
+ * often enough that a single-row edit beats re-pasting a whole JSON blob.
+ * Returns {} on error (callers treat a missing/null entry as "no email").
+ */
+export async function getDeptHeads() {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.from("dept_heads").select("department, head_email");
+  if (error) { console.warn(`⚠️  dept_heads read failed: ${error.message}`); return {}; }
+  return Object.fromEntries(data.map((r) => [r.department, r.head_email]));
+}
+
+/**
  * Upsert one sender → physician match result into sender_physician_match.
  * Replaces the sender-physician-match.csv file previously committed to the repo.
  */

@@ -45,9 +45,8 @@ jobs:
           # Supabase
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
-          # JSON object mapping department name → head's email (null = no email).
-          # e.g. {"ศัลยกรรม":"dr@hosp.com","อายุรกรรม":"dr@hosp.com","เวชกรรมฟื้นฟู":null}
-          DEPT_HEADS_JSON:      ${{ secrets.DEPT_HEADS_JSON }}
+          # Department -> head email now comes from the Supabase dept_heads
+          # table (see automation/sql/dept_heads.sql), not this secret.
           # Google Drive root folder ID for P4P files (used to resolve per-physician links)
           P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
         run: node scripts/score-tracker.mjs

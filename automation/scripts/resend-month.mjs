@@ -15,8 +15,10 @@
  * Required env vars (same as score-tracker.mjs):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
  *   SUPABASE_URL, SUPABASE_KEY
- *   DEPT_HEADS_JSON
  *   P4P_FOLDER_ID (optional — enables Drive file links)
+ *
+ * Department → head email comes from the Supabase dept_heads table (see
+ * sql/dept_heads.sql), same as score-tracker.mjs.
  */
 
 import { createClient }          from "@supabase/supabase-js";
@@ -25,16 +27,12 @@ import { appendFileSync }        from "fs";
 import { createGmailClient }     from "../gmail-client.js";
 import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
+import { getDeptHeads }          from "../supabase-client.js";
 
 dotenvConfig({ override: true });
 
 const TARGET_MONTH = process.env.TARGET_MONTH ?? "2569_03";
 const EXEMPT_DEPTS = new Set(["INTERN"]);
-
-const DEPT_HEADS = (() => {
-  try { return JSON.parse(process.env.DEPT_HEADS_JSON || "{}"); }
-  catch (e) { console.warn("⚠️  Could not parse DEPT_HEADS_JSON:", e.message); return {}; }
-})();
 
 const THAI_MONTHS = {
   "01":"มกราคม","02":"กุมภาพันธ์","03":"มีนาคม","04":"เมษายน",
@@ -115,8 +113,9 @@ async function main() {
   console.log(`  (Exclusively ${TARGET_MONTH} — not the usual 3-month window)`);
   console.log(`${"═".repeat(62)}\n`);
 
-  const sb    = createSB();
-  const gmail = createGmailClient();
+  const sb         = createSB();
+  const gmail      = createGmailClient();
+  const DEPT_HEADS = await getDeptHeads();
 
   const drive = process.env.P4P_FOLDER_ID ? createDriveClient() : null;
   let driveFileMap = null;
