@@ -35,6 +35,5 @@ jobs:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
-          DEPT_HEADS_JSON:      ${{ secrets.DEPT_HEADS_JSON }}
           P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
         run: node scripts/resend-month.mjs

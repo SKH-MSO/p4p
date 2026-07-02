@@ -1,9 +1,10 @@
 /**
  * scripts/extract-dept-heads.mjs
  *
- * ONE-OFF, LOCAL-ONLY bootstrap for the DEPT_HEADS_JSON secret used by
- * score-tracker.mjs. Do NOT run this as a GitHub Actions workflow — this
- * repo is public, and the output contains real staff email addresses.
+ * ONE-OFF, LOCAL-ONLY bootstrap for the Supabase dept_heads table (see
+ * sql/dept_heads.sql) used by score-tracker.mjs / resend-month.mjs. Do NOT
+ * run this as a GitHub Actions workflow — this repo is public, and the
+ * output contains real staff email addresses.
  *
  * Scans every message under Gmail label "head" (sent P4P score reports),
  * derives the department name from the first attachment's filename
@@ -16,8 +17,9 @@
  * Output:
  *   - Diagnostics printed to stdout (review before trusting the JSON!)
  *   - Best-guess JSON written to OUTPUT_PATH (default: dept-heads.local.json,
- *     already .gitignore'd — never commit it). Paste its contents into the
- *     DEPT_HEADS_JSON GitHub secret by hand, then delete the local file.
+ *     already .gitignore'd — never commit it). Turn it into `insert into
+ *     dept_heads (...) values (...)` statements (or edit rows directly in
+ *     the Supabase Table Editor), then delete the local file.
  *
  * Environment variables:
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -170,7 +172,7 @@ async function main() {
   console.log(`\n${"═".repeat(60)}`);
   console.log(`  📄  Wrote ${OUTPUT_PATH}`);
   console.log(`  Review the diagnostics above, hand-correct any gaps/mismatches,`);
-  console.log(`  then paste the JSON into the DEPT_HEADS_JSON secret. Do not commit this file.`);
+  console.log(`  then insert/update rows in the Supabase dept_heads table. Do not commit this file.`);
   console.log(`${"═".repeat(60)}\n`);
 }
 
