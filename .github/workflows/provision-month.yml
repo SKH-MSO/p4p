@@ -30,9 +30,6 @@ on:
 jobs:
   provision:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: automation
 
     steps:
       - name: Skip unless tomorrow is the 1st
@@ -60,10 +57,12 @@ jobs:
 
       - name: Install dependencies
         if: steps.guard.outputs.run == 'true'
+        working-directory: automation
         run: npm ci
 
       - name: Provision new month table
         if: steps.guard.outputs.run == 'true'
+        working-directory: automation
         env:
           SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY:       ${{ secrets.SUPABASE_KEY }}
