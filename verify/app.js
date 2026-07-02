@@ -35,14 +35,20 @@
         const codeSubmit  = document.getElementById("code-submit")
         const backBtn     = document.getElementById("back-btn")
         const sentTo      = document.getElementById("sent-to")
+        const requestStep = document.getElementById("request-step")
+        const reqName     = document.getElementById("reqname")
+        const reqEmail    = document.getElementById("req-email")
+        const requestSubmit = document.getElementById("request-submit")
+        const requestBack = document.getElementById("request-back")
         const msg         = document.getElementById("msg")
 
         let currentEmail = ""
 
         // ── Helpers ───────────────────────────────────────────────────────────
-        const showError = (text) => { msg.className = "msg error"; msg.textContent = text }
-        const showOk    = (text) => { msg.className = "msg ok";    msg.textContent = text }
-        const clearMsg  = ()     => { msg.className = "msg";       msg.textContent = "" }
+        const showError  = (text) => { msg.className = "msg error";  msg.textContent = text }
+        const showOk     = (text) => { msg.className = "msg ok";     msg.textContent = text }
+        const showNotice = (text) => { msg.className = "msg notice"; msg.textContent = text }
+        const clearMsg   = ()     => { msg.className = "msg";        msg.textContent = "" }
         const busy = (btn, on, label) => {
             btn.disabled = on
             btn.innerHTML = on ? '<span class="spinner"></span>' + label : label
@@ -106,11 +112,15 @@
                     await db.rpc("is_sender_allowlisted", { p_email: email })
                 if (rpcErr) throw rpcErr
                 if (!allowed) {
-                    // Not on the list yet — log the attempt so an admin can add
-                    // this physician to the directory, and tell them it's pending.
-                    await db.rpc("log_access_request", { p_email: email })
+                    // Not on the list yet — ask for their name so an admin can
+                    // identify and add them, then log the request (see request-step).
+                    currentEmail = email
+                    reqEmail.textContent = email
                     busy(emailSubmit, false, "ส่งรหัสยืนยัน")
-                    showError("อีเมลนี้ยังไม่ได้ลงทะเบียน ระบบได้บันทึกคำขอแล้ว ผู้ดูแลจะเพิ่มให้ท่านเร็ว ๆ นี้")
+                    clearMsg()
+                    emailStep.classList.add("hidden")
+                    requestStep.classList.remove("hidden")
+                    reqName.focus()
                     return
                 }
 
@@ -165,6 +175,35 @@
             codeStep.classList.add("hidden")
             emailStep.classList.remove("hidden")
             codeInput.value = ""
+            emailInput.focus()
+        })
+
+        // ── Step 2b — submit an access request (name + email) ─────────────────
+        requestStep.addEventListener("submit", async (e) => {
+            e.preventDefault()
+            clearMsg()
+            const name = reqName.value.trim()
+            if (name.length < 2) {
+                showError("กรุณากรอกชื่อ-นามสกุลของท่าน")
+                return
+            }
+            busy(requestSubmit, true, "กำลังส่ง...")
+            try {
+                await db.rpc("log_access_request", { p_email: currentEmail, p_name: name })
+                requestStep.classList.add("hidden")
+                showNotice("ส่งคำขอเรียบร้อยแล้ว ผู้ดูแลจะเพิ่มสิทธิ์ให้ท่านเร็ว ๆ นี้ กรุณากลับมายืนยันอีกครั้งภายหลัง")
+            } catch (err) {
+                console.error(err)
+                busy(requestSubmit, false, "ส่งคำขอเข้าใช้งาน")
+                showError("ส่งคำขอไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+            }
+        })
+
+        requestBack.addEventListener("click", () => {
+            clearMsg()
+            requestStep.classList.add("hidden")
+            emailStep.classList.remove("hidden")
+            reqName.value = ""
             emailInput.focus()
         })
       })()

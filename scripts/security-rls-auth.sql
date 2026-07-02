@@ -56,8 +56,10 @@
 --  physician has no row in sender_physician_match until their first submission,
 --  so add them to physician_directory (Supabase Table Editor → new row: email,
 --  full_name, department) and they can verify immediately. If a physician tries
---  an email that isn't allow-listed, /verify/ records it in access_requests —
---  check that table (resolved = false) to see who still needs adding.
+--  an email that isn't allow-listed, /verify/ asks for their name and records it
+--  in access_requests (email + name) — check that table (resolved = false) to see
+--  who still needs adding. OPTIONAL: scripts/notify-access-request.sql sends a
+--  Telegram alert on each new request so an admin doesn't have to poll the table.
 --
 --  Revoking access: add the email to blocked_emails (Table Editor). It overrides
 --  BOTH allow-list branches, so it revokes a matched sender or a directory entry
@@ -108,10 +110,13 @@ create table if not exists public.physician_directory (
 
 create table if not exists public.access_requests (
   email          text primary key,
+  name           text,   -- self-reported name so an admin knows who to add
   requested_at   timestamptz not null default now(),
   request_count  integer     not null default 1,
   resolved       boolean     not null default false
 );
+-- If the table pre-dates the name column, add it.
+alter table public.access_requests add column if not exists name text;
 
 -- Denylist / revocation. Directory rows can be disabled via active=false, but a
 -- MATCHED sender (in sender_physician_match) has no such switch — deleting their
@@ -203,28 +208,31 @@ as $$
   select public.is_sender_allowlisted(auth.jwt() ->> 'email');
 $$;
 
--- Called by /verify/ when an email is NOT allow-listed: record the attempt so
--- an admin can add the physician to the directory. Never reveals anything.
-create or replace function public.log_access_request(p_email text)
+-- Called by /verify/ when an email is NOT allow-listed: record the attempt (with
+-- the self-reported name) so an admin knows WHO to add. Never reveals anything.
+-- Dropped-and-recreated because the signature gained p_name.
+drop function if exists public.log_access_request(text);
+create or replace function public.log_access_request(p_email text, p_name text default null)
 returns void
 language sql
 security definer
 set search_path = public
 as $$
-  insert into public.access_requests (email, requested_at, request_count, resolved)
-  values (lower(p_email), now(), 1, false)
+  insert into public.access_requests (email, name, requested_at, request_count, resolved)
+  values (lower(p_email), nullif(trim(p_name), ''), now(), 1, false)
   on conflict (email) do update
-    set requested_at  = now(),
+    set name          = coalesce(nullif(trim(excluded.name), ''), access_requests.name),
+        requested_at  = now(),
         request_count = access_requests.request_count + 1,
         resolved      = false;
 $$;
 
 revoke all on function public.is_sender_allowlisted(text)   from public;
 revoke all on function public.is_current_user_allowlisted() from public;
-revoke all on function public.log_access_request(text)      from public;
+revoke all on function public.log_access_request(text, text) from public;
 grant execute on function public.is_sender_allowlisted(text) to anon, authenticated;
 grant execute on function public.is_current_user_allowlisted() to authenticated;
-grant execute on function public.log_access_request(text)    to anon, authenticated;
+grant execute on function public.log_access_request(text, text) to anon, authenticated;
 
 
 -- ----------------------------------------------------------------------------

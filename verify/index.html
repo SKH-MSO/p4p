@@ -115,8 +115,9 @@
             border-radius: var(--radius);
             display: none;
         }
-        .msg.error { display: block; background: #fbeae8; color: var(--danger); }
-        .msg.ok    { display: block; background: #eef5ee; color: #2f7d32; }
+        .msg.error  { display: block; background: #fbeae8; color: var(--danger); }
+        .msg.ok     { display: block; background: #eef5ee; color: #2f7d32; }
+        .msg.notice { display: block; background: var(--tertiary); color: var(--secondary); border: 1px solid var(--border); }
 
         .link-btn {
             background: none;
@@ -190,6 +191,16 @@
                 <button id="code-submit" type="submit">ยืนยัน</button>
                 <p class="hint">ส่งรหัสไปที่ <b id="sent-to"></b> แล้ว</p>
                 <button id="back-btn" type="button" class="link-btn">ใช้อีเมลอื่น</button>
+            </form>
+
+            <!-- Step 2b: request access (email not yet registered) -->
+            <form id="request-step" class="hidden">
+                <label for="reqname">ชื่อ-นามสกุล</label>
+                <input id="reqname" type="text" autocomplete="name"
+                    placeholder="เช่น นพ.สมชาย ใจดี" required>
+                <button id="request-submit" type="submit">ส่งคำขอเข้าใช้งาน</button>
+                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณากรอกชื่อเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
+                <button id="request-back" type="button" class="link-btn">ใช้อีเมลอื่น</button>
             </form>
 
             <div id="msg" class="msg"></div>
