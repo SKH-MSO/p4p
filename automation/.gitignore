@@ -6,6 +6,9 @@
 # Runtime log — contains physician PII (email addresses)
 error-email-log.json
 
+# Bootstrap output for DEPT_HEADS_JSON secret — contains real staff emails
+dept-heads.local.json
+
 # Python
 __pycache__/
 *.pyc
