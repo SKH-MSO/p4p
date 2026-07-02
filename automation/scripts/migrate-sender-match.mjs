@@ -20,6 +20,15 @@ dotenvConfig({ override: true });
 
 const CSV_PATH = process.argv[2] ?? "../sender-physician-match.csv";
 
+// This can run on GitHub Actions in a PUBLIC repo — never print a full
+// sender address to console, which is publicly readable job output.
+function maskEmail(email) {
+  const [user, domain] = String(email ?? "").split("@");
+  if (!domain) return "***";
+  const masked = user.length <= 2 ? `${user[0] ?? "*"}*` : `${user[0]}${"*".repeat(user.length - 2)}${user.slice(-1)}`;
+  return `${masked}@${domain}`;
+}
+
 // Minimal RFC-4180 CSV line parser — handles quoted fields with embedded
 // commas/quotes, matching the csvCell() escaping match-sender-emails.mjs used.
 function parseCsvLine(line) {
@@ -70,7 +79,7 @@ async function main() {
       ok++;
     } catch (e) {
       fail++;
-      console.warn(`⚠️  ${row.sender_email}: ${e.message}`);
+      console.warn(`⚠️  ${maskEmail(row.sender_email)}: ${e.message}`);
     }
   }
 
