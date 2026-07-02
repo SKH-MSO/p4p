@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ยืนยันอีเมล — SAKHONMSO P4P</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary: #A68966;
+            --secondary: #4B3D33;
+            --tertiary: #F5F5F0;
+            --neutral: #FAF9F6;
+            --text: #2d2d2d;
+            --text-muted: #6b6b6b;
+            --muted: #9A8A7A;
+            --border: #d9d2c8;
+            --danger: #c0392b;
+            --radius: 4px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            background: var(--neutral);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 380px;
+            background: var(--neutral);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 6px 24px rgba(75, 61, 51, 0.08);
+            overflow: hidden;
+        }
+
+        .card-head {
+            background: var(--primary);
+            color: #fff;
+            padding: 22px 24px;
+        }
+        .card-head h1 {
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .card-head p { font-size: .85rem; opacity: .9; }
+
+        .card-body { padding: 24px; }
+
+        label {
+            display: block;
+            font-size: .8rem;
+            font-weight: 600;
+            color: var(--secondary);
+            margin-bottom: 6px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 14px;
+            font-size: 1rem;
+            font-family: inherit;
+            color: var(--text);
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            outline: none;
+            transition: border-color .15s;
+        }
+        input:focus { border-color: var(--primary); }
+        input[inputmode="numeric"] {
+            letter-spacing: .4em;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        button {
+            width: 100%;
+            margin-top: 16px;
+            padding: 12px 14px;
+            font-size: .95rem;
+            font-weight: 600;
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            color: #fff;
+            background: var(--secondary);
+            border: none;
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: opacity .15s;
+        }
+        button:disabled { opacity: .5; cursor: default; }
+
+        .hint { margin-top: 14px; font-size: .8rem; color: var(--text-muted); line-height: 1.5; }
+        .hint b { color: var(--secondary); font-weight: 600; word-break: break-all; }
+
+        .msg {
+            margin-top: 14px;
+            font-size: .82rem;
+            padding: 10px 12px;
+            border-radius: var(--radius);
+            display: none;
+        }
+        .msg.error  { display: block; background: #fbeae8; color: var(--danger); }
+        .msg.ok     { display: block; background: #eef5ee; color: #2f7d32; }
+        .msg.notice { display: block; background: var(--tertiary); color: var(--secondary); border: 1px solid var(--border); }
+
+        .link-btn {
+            background: none;
+            color: var(--muted);
+            font-weight: 500;
+            width: auto;
+            padding: 0;
+            margin-top: 16px;
+            text-decoration: underline;
+            font-size: .8rem;
+        }
+
+        .hidden { display: none !important; }
+
+        .spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,.4);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Desktop / non-LINE block (mirrors status/list/ranking) ──────────── */
+        #desktop-block {
+            display: none;
+            position: fixed; inset: 0;
+            background: var(--neutral);
+            flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; padding: 32px; z-index: 999;
+        }
+        #desktop-block h2 {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
+        }
+        #desktop-block p { color: var(--muted); font-size: .95rem; }
+    </style>
+</head>
+
+<body>
+    <div id="desktop-block">
+        <h2>ไม่รองรับการใช้งานบนคอมพิวเตอร์</h2>
+        <p>กรุณาเปิดลิงก์นี้ผ่านโทรศัพท์มือถือ</p>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <h1>ยืนยันตัวตน</h1>
+            <p>SAKHONMSO P4P</p>
+        </div>
+        <div class="card-body">
+
+            <!-- Step 1: email -->
+            <form id="email-step">
+                <label for="email">อีเมลที่ใช้ส่ง P4P</label>
+                <input id="email" type="email" inputmode="email" autocomplete="email"
+                    placeholder="name@example.com" required>
+                <button id="email-submit" type="submit">ส่งรหัสยืนยัน</button>
+                <p class="hint">ระบบจะส่งรหัส 6 หลักไปยังอีเมลของท่าน เฉพาะอีเมลที่เคยส่ง P4P เท่านั้นจึงจะเข้าใช้งานได้</p>
+            </form>
+
+            <!-- Step 2: OTP code -->
+            <form id="code-step" class="hidden">
+                <label for="code">รหัสยืนยัน 6 หลัก</label>
+                <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                    maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+                <button id="code-submit" type="submit">ยืนยัน</button>
+                <p class="hint">ส่งรหัสไปที่ <b id="sent-to"></b> แล้ว</p>
+                <button id="back-btn" type="button" class="link-btn">ใช้อีเมลอื่น</button>
+            </form>
+
+            <!-- Step 2b: request access (email not yet registered) -->
+            <form id="request-step" class="hidden">
+                <label for="reqname">ชื่อ-นามสกุล</label>
+                <input id="reqname" type="text" autocomplete="name"
+                    placeholder="เช่น นพ.สมชาย ใจดี" required>
+                <button id="request-submit" type="submit">ส่งคำขอเข้าใช้งาน</button>
+                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณากรอกชื่อเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
+                <button id="request-back" type="button" class="link-btn">ใช้อีเมลอื่น</button>
+            </form>
+
+            <div id="msg" class="msg"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.50.0/dist/umd/supabase.js"
+        integrity="sha384-K0oxqktRvaThvYgGL4G+OK2Ih6VS6Uyu7j3+7WJgp/uWM0Yv6Xi4YEiw0BB+mPfi"
+        crossorigin="anonymous"></script>
+    <script src="/assets/shared.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
