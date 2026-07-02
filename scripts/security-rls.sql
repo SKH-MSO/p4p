@@ -69,6 +69,8 @@ begin
   loop
     execute format('alter table public.%I enable row level security;', t);
     execute format('alter table public.%I add column if not exists submitted_at timestamptz;', t);
+    execute format('drop policy if exists "ALL" on public.%I;', t);
+    execute format('drop policy if exists "anon full access" on public.%I;', t);
     execute format('drop policy if exists "anon read roster" on public.%I;', t);
     execute format('create policy "anon read roster" on public.%I for select to anon using (true);', t);
     execute format('revoke all on public.%I from anon;', t);

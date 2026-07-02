@@ -49,7 +49,32 @@ SELECT count(*) AS roster_count FROM public."{{NEW}}";
 SELECT tablename, rowsecurity FROM pg_tables
 WHERE schemaname = 'public' AND tablename = '{{NEW}}';
 
-SELECT grantee, string_agg(privilege_type, ', ') AS privs
-FROM information_schema.role_table_grants
-WHERE table_schema = 'public' AND table_name = '{{NEW}}'
-GROUP BY grantee;
+-- 5a. HARD CHECK — the pages read via the anon key, and anon access is a
+--     COLUMN-level grant. This does NOT appear in role_table_grants unless it
+--     covers every column, so verifying grants there gives false confidence:
+--     a missing anon grant silently returns HTTP 401 "permission denied for
+--     table" to the browser ("data not loading"). Query column_privileges
+--     instead and fail loudly if the 4 read columns aren't all granted to anon.
+DO $$
+DECLARE n int;
+BEGIN
+  SELECT count(*) INTO n
+  FROM information_schema.column_privileges
+  WHERE grantee = 'anon'
+    AND table_schema = 'public'
+    AND table_name = '{{NEW}}'
+    AND column_name IN ('firstname', 'lastname', 'department', 'submitted_at');
+  IF n <> 4 THEN
+    RAISE EXCEPTION
+      'anon read grant on public."%" is incomplete (% of 4 columns) — the LIFF pages will fail with 401. Re-run step 4 (the GRANT SELECT (...) TO anon line).',
+      '{{NEW}}', n;
+  END IF;
+  RAISE NOTICE 'OK: anon can read all 4 columns on public."%".', '{{NEW}}';
+END $$;
+
+-- 5b. Show anon's column grants for a visual confirmation (should list the 4
+--     read columns). role_table_grants is intentionally NOT used here.
+SELECT table_name, column_name, privilege_type
+FROM information_schema.column_privileges
+WHERE grantee = 'anon' AND table_schema = 'public' AND table_name = '{{NEW}}'
+ORDER BY column_name;

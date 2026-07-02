@@ -148,6 +148,28 @@ async function getDistinctDepts(sb, tableKeys) {
   return [...deptSet].sort();
 }
 
+// ── Send-log helpers (email_sent_log) ───────────────────────────────────────
+// Prevents re-sending the same department's report if the run is retried or
+// manually re-triggered, and leaves an audit trail of when each report went out.
+async function getAlreadySent(sb, tableKey) {
+  const { data, error } = await sb
+    .from("email_sent_log")
+    .select("department")
+    .eq("table_name", tableKey);
+  if (error) { console.warn(`⚠️  email_sent_log read failed: ${error.message}`); return new Set(); }
+  return new Set(data.map(r => r.department));
+}
+
+async function logEmailSent(sb, tableKey, department) {
+  const { error } = await sb
+    .from("email_sent_log")
+    .upsert(
+      { table_name: tableKey, department, sent_at: new Date().toISOString() },
+      { onConflict: "table_name,department", ignoreDuplicates: true }
+    );
+  if (error) console.warn(`⚠️  email_sent_log insert failed [${department}]: ${error.message}`);
+}
+
 
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
@@ -184,11 +206,20 @@ async function main() {
   if (!depts.length) { console.log("⚠️  No departments found — nothing to do."); return; }
   console.log(`🏥  Departments: ${depts.join(", ")}\n`);
 
+  // ── Skip departments already reported for this month (dedup via email_sent_log)
+  const reportMonthKey = months[0]; // most-recent month = the one this run reports for
+  const alreadySent     = await getAlreadySent(sb, reportMonthKey);
+  const pendingDepts    = depts.filter(d => !alreadySent.has(d));
+  const skippedDepts    = depts.filter(d => alreadySent.has(d));
+  if (skippedDepts.length) {
+    console.log(`⏭️   Already sent for ${tableKeyToDisplay(reportMonthKey)}: ${skippedDepts.join(", ")}\n`);
+  }
+
   // ── Phase 1: gather per-dept status for all 3 months ───────────────────
   // deptData: dept → { monthsData }
   const deptData = new Map();
 
-  for (const dept of depts) {
+  for (const dept of pendingDepts) {
     console.log(`┌─ ${dept}`);
     const monthsData = [];
     for (const key of months) {
@@ -241,12 +272,17 @@ async function main() {
     console.log(`    ✉️  ส่งแล้ว`);
 
     for (const { dept } of deptList) {
+      await logEmailSent(sb, reportMonthKey, dept);
       summaryRows.push({ dept, emailed: true, note: "ส่งแล้ว" });
     }
   }
 
   for (const dept of noEmail) {
     summaryRows.push({ dept, emailed: false, note: "ไม่มีอีเมลหัวหน้า" });
+  }
+
+  for (const dept of skippedDepts) {
+    summaryRows.push({ dept, emailed: false, note: `ส่งแล้วก่อนหน้านี้ (${tableKeyToDisplay(reportMonthKey)})` });
   }
 
   writeSummary(summaryRows, months, todayStr);
