@@ -24,11 +24,24 @@
 --    2. Authentication → Email Templates → "Magic Link": make sure the body
 --       includes the numeric token, e.g.  {{ .Token }}  — otherwise Supabase
 --       sends only a magic link and the 6-digit code box can't be used.
---    3. (Recommended) Authentication → Providers → Email: turn OFF
---       "Allow new users to sign up" if you pre-create users; otherwise leave
---       it ON — RLS below still blocks any non-allow-listed email from reading.
+--    3. Keep "Allow new users to sign up" ON. The verify page uses
+--       signInWithOtp(shouldCreateUser:true) so a newly-added physician can get
+--       a session on first login; disabling signups would lock them out. RLS
+--       below is what actually restricts data — not the signup toggle.
 --    4. Configure SMTP (Authentication → SMTP) so OTP emails actually send in
 --       production. The default Supabase mailer is rate-limited to a few/hour.
+--    5. HARDENING (recommended):
+--       • Auth → Sessions/Providers: shorten the Email OTP expiry (e.g. 300s).
+--         A 6-digit code is only ~1e6 combinations; a long window widens brute
+--         force. Also keep Supabase's built-in auth rate limits enabled.
+--       • Auth → Providers: turn OFF "Anonymous sign-ins" — an anonymous JWT has
+--         no email, so is_current_user_allowlisted() denies it (fails closed),
+--         but there's no reason to allow minting such tokens at all.
+--       • Anyone with the public key can trigger signInWithOtp for ANY address
+--         (OTP email spam) and can call is_sender_allowlisted (a yes/no oracle
+--         on whether an email is a physician). Neither exposes data — RLS still
+--         gates that — but consider Supabase Auth rate limits / CAPTCHA if abuse
+--         is seen.
 --
 --  Rollout order
 --  -------------
@@ -95,6 +108,25 @@ alter table public.physician_directory enable row level security;
 alter table public.access_requests     enable row level security;
 revoke all on public.physician_directory from anon, authenticated;
 revoke all on public.access_requests     from anon, authenticated;
+
+-- CRITICAL — lock the tables the allow-list is built from.
+--   sender_physician_match holds physician emails+names and, because the
+--   allow-list is (physician_directory UNION sender_physician_match), any row an
+--   attacker could INSERT here would grant them access. It was never RLS-locked,
+--   so with Supabase's default table grants the public/anon key could read the
+--   whole email list AND potentially write to it (= allow-list tampering / auth
+--   bypass). dept_heads similarly leaks head emails. Enable RLS with NO policy so
+--   both are default-deny for anon/authenticated; the SECURITY DEFINER functions
+--   (table owner) and the service_role key still reach them, so nothing breaks.
+alter table public.sender_physician_match enable row level security;
+revoke all on public.sender_physician_match from anon, authenticated;
+do $$
+begin
+  if to_regclass('public.dept_heads') is not null then
+    execute 'alter table public.dept_heads enable row level security';
+    execute 'revoke all on public.dept_heads from anon, authenticated';
+  end if;
+end $$;
 
 -- One-time seed: pull every email we already know from past senders so the
 -- directory isn't empty on day one. Idempotent (on conflict do nothing).
@@ -174,7 +206,7 @@ create policy "verified read submissions"
   on public.p4p_submissions for select to authenticated
   using (public.is_current_user_allowlisted());
 
-revoke all on public.p4p_submissions from anon;
+revoke all on public.p4p_submissions from anon, authenticated;
 grant select (physician_name, department, work_month, submitted_at)
   on public.p4p_submissions to authenticated;
 
@@ -195,7 +227,7 @@ begin
     execute format('drop policy if exists "anon read roster" on public.%I;', t);
     execute format('drop policy if exists "verified read roster" on public.%I;', t);
     execute format('create policy "verified read roster" on public.%I for select to authenticated using (public.is_current_user_allowlisted());', t);
-    execute format('revoke all on public.%I from anon;', t);
+    execute format('revoke all on public.%I from anon, authenticated;', t);
     execute format('grant select (firstname, lastname, department, submitted_at) on public.%I to authenticated;', t);
   end loop;
 end $$;
@@ -219,7 +251,7 @@ begin
         execute format('drop policy if exists "anon read roster" on public.%I;', nm);
         execute format('drop policy if exists "verified read roster" on public.%I;', nm);
         execute format('create policy "verified read roster" on public.%I for select to authenticated using (public.is_current_user_allowlisted());', nm);
-        execute format('revoke all on public.%I from anon;', nm);
+        execute format('revoke all on public.%I from anon, authenticated;', nm);
         execute format('grant select (firstname, lastname, department, submitted_at) on public.%I to authenticated;', nm);
       exception when others then
         raise warning 'secure_new_roster failed for %: %', nm, sqlerrm;
