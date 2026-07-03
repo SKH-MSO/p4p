@@ -1,0 +1,71 @@
+<!--
+  P4P OTP email — on-brand (design.md: tan #A68966 / brown #4B3D33).
+
+  WHERE THIS GOES (Supabase dashboard, NOT the repo build):
+    Authentication → Emails → Templates → paste into BOTH:
+      • "Magic Link"     (returning users)
+      • "Confirm signup" (brand-new users)
+    Subject line for both:  รหัสยืนยัน P4P — องค์กรแพทย์ ร.พ.สมุทรสาคร
+    Sender name (SMTP settings):  องค์กรแพทย์ ร.พ.สมุทรสาคร
+
+  Table-based + inline styles for email-client compatibility (Gmail strips
+  <style>/class). {{ .Token }} is the 6-digit code Supabase injects.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;padding:0;background:#FAF9F6;">
+  <tr>
+    <td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;background:#FAF9F6;border:1px solid #ECE7DF;border-radius:8px;overflow:hidden;font-family:'Segoe UI',Roboto,Helvetica,Arial,'Noto Sans Thai',sans-serif;">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:#A68966;padding:22px 28px;">
+            <div style="font-size:18px;font-weight:700;color:#ffffff;line-height:1.3;">องค์กรแพทย์ ร.พ.สมุทรสาคร</div>
+            <div style="font-size:12px;letter-spacing:1px;color:#F5F0E8;margin-top:2px;">SAKHONMSO P4P</div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:30px 28px 8px;">
+            <div style="font-size:15px;color:#3A2F27;line-height:1.6;">เรียน แพทย์ผู้ใช้งาน</div>
+            <div style="font-size:14px;color:#6b6b6b;line-height:1.6;margin-top:8px;">รหัสยืนยันสำหรับเข้าใช้งานระบบ P4P ของท่านคือ</div>
+          </td>
+        </tr>
+
+        <!-- Code -->
+        <tr>
+          <td align="center" style="padding:14px 28px 6px;">
+            <div style="display:inline-block;background:#F5F5F0;border:1px solid #E4DCCF;border-radius:8px;padding:16px 28px;font-size:34px;font-weight:700;letter-spacing:10px;color:#4B3D33;">{{ .Token }}</div>
+          </td>
+        </tr>
+
+        <tr>
+          <td align="center" style="padding:6px 28px 26px;">
+            <div style="font-size:12px;color:#9A8A7A;line-height:1.6;">กรุณากรอกรหัสนี้ในหน้ายืนยันตัวตน<br>รหัสจะหมดอายุในไม่ช้า</div>
+          </td>
+        </tr>
+
+        <!-- Divider + note -->
+        <tr>
+          <td style="padding:0 28px;">
+            <div style="border-top:1px solid #ECE7DF;"></div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 28px 26px;">
+            <div style="font-size:12px;color:#9A8A7A;line-height:1.6;">หากท่านไม่ได้เป็นผู้ร้องขอรหัสนี้ กรุณาเพิกเฉยต่ออีเมลฉบับนี้ ระบบจะไม่ดำเนินการใด ๆ หากไม่มีการกรอกรหัส</div>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="background:#4B3D33;padding:16px 28px;">
+            <div style="font-size:12px;color:#EDE6DC;line-height:1.5;">องค์กรแพทย์ โรงพยาบาลสมุทรสาคร</div>
+            <div style="font-size:11px;color:#B9A88F;margin-top:2px;">อีเมลอัตโนมัติ — กรุณาอย่าตอบกลับ</div>
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
