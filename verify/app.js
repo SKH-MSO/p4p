@@ -152,15 +152,27 @@
             }
             busy(codeSubmit, true, "กำลังยืนยัน...")
             try {
-                const { error } = await db.auth.verifyOtp({
+                const { data, error } = await db.auth.verifyOtp({
                     email: currentEmail,
                     token,
                     type: "email",
                 })
                 if (error) throw error
+                if (!data.session) throw new Error("verifyOtp returned no session")
                 clearPending()
                 showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
-                location.replace(RETURN_TO)
+
+                // Hand the session to the destination page explicitly via the URL
+                // fragment instead of relying on it reading this page's localStorage
+                // write — some in-app browsers don't reliably carry storage across a
+                // full page navigation. The fragment is never sent to the server
+                // (unlike a query string); auth-guard.js consumes and strips it
+                // immediately on load. Same technique Supabase's own hosted
+                // magic-link flow uses.
+                const handoff = new URLSearchParams()
+                handoff.set("p4p_at", data.session.access_token)
+                handoff.set("p4p_rt", data.session.refresh_token)
+                location.replace(RETURN_TO + "#" + handoff.toString())
             } catch (err) {
                 console.error(err)
                 busy(codeSubmit, false, "ยืนยัน")
