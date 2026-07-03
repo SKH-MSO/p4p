@@ -1,5 +1,5 @@
 export const RELEASE  = 'v1'
-export const BASE_URL = 'https://skh-mso-p4p.vercel.app/assets/cards/v1'
+export const BASE_URL = 'https://p4p-sakhonmso.vercel.app/assets/cards/v1'
 export const ALT_TEXT = 'อัปเดตใหม่ — ระบบ P4P มีฟีเจอร์ใหม่ 3 อย่าง'
 
 // SVG strings + render widths. Height is derived from viewBox aspect ratio.
