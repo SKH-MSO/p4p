@@ -1,7 +1,9 @@
 /**
  * scripts/backfill-submissions.mjs
  *
- * One-off backfill of the p4p_submissions table for past months.
+ * One-off backfill of the p4p_submissions table for past months — and of each
+ * roster (YYYY_MM) table's own submitted_at column, since /status/ and
+ * /ranking/ read submitted_at from the roster table, not from p4p_submissions.
  *
  * Strategy (no Claude re-analysis needed):
  *   1. List all threads labelled "เอกสาร P4P" since BACKFILL_AFTER.
@@ -14,7 +16,9 @@
  *      in index.js stores, so backfilled rows are consistent with new ones.
  *   4. submitted_at = date of the physician's email that triggered that reply
  *      (latest non-bot message at/just before the reply).
- *   5. logSubmission() upserts (idempotent — safe to re-run).
+ *   5. logSubmission() upserts (idempotent — safe to re-run), then
+ *      markRosterSubmitted() fills the roster row's submitted_at if it's
+ *      still NULL (never overwrites one the live pipeline already set).
  *
  * Only work months in TARGET_MONTHS are written (default: May→March 2569).
  *
@@ -31,7 +35,7 @@ import { google }              from "googleapis";
 import { config as dotenvConfig } from "dotenv";
 import { appendFileSync }       from "fs";
 import { createGmailClient }    from "../gmail-client.js";
-import { matchName, logSubmission } from "../supabase-client.js";
+import { matchName, logSubmission, markRosterSubmitted } from "../supabase-client.js";
 
 dotenvConfig({ override: true });
 
@@ -165,9 +169,10 @@ async function main() {
       // 3. canonical name + department via the same matcher the live hook uses
       let physicianName = cleanName(parsed.rawName);
       let department = null;
+      let rosterIndex = null;
       try {
         const m = await matchName(physicianName, parsed.workMonth);
-        if (m) { physicianName = m.matchedName; department = m.department ?? null; }
+        if (m) { physicianName = m.matchedName; department = m.department ?? null; rosterIndex = m.index ?? null; }
       } catch { /* table missing/other — keep cleaned name */ }
 
       found.push({
@@ -177,6 +182,7 @@ async function main() {
         submittedAt : new Date(trigger.msg.date).toISOString(),
         threadId    : t.id,
         filename    : xAtt?.filename ?? null,
+        rosterIndex,
       });
     }
   });
@@ -205,13 +211,24 @@ async function main() {
   }
 
   // 5. Write
-  let written = 0, failed = 0;
+  let written = 0, failed = 0, rosterSynced = 0, rosterFailed = 0;
   if (!DRY_RUN) {
     for (const s of submissions) {
       try { await logSubmission(s); written++; }
-      catch (e) { failed++; console.error(`❌  ${s.physicianName} ${s.workMonth}: ${e.message}`); }
+      catch (e) { failed++; console.error(`❌  ${s.physicianName} ${s.workMonth}: ${e.message}`); continue; }
+
+      // Sync into the roster (YYYY_MM) table too — /status/ and /ranking/ read
+      // submitted_at from there, not from p4p_submissions.
+      if (s.rosterIndex !== null) {
+        try { await markRosterSubmitted(s.workMonth, s.rosterIndex, s.submittedAt); rosterSynced++; }
+        catch (e) { rosterFailed++; console.error(`⚠️  roster sync failed for ${s.physicianName} ${s.workMonth}: ${e.message}`); }
+      } else {
+        rosterFailed++;
+        console.warn(`⚠️  no roster match — ${s.physicianName} ${s.workMonth} stays unsynced on /status/`);
+      }
     }
     console.log(`💾  Upserted ${written} row(s)${failed ? `, ${failed} failed` : ""}.`);
+    console.log(`🔗  Roster submitted_at synced: ${rosterSynced}${rosterFailed ? `, ${rosterFailed} not synced` : ""}.`);
   } else {
     console.log(`🟡  DRY RUN — nothing written.`);
   }
@@ -221,7 +238,7 @@ async function main() {
   if (sp) {
     let md = `# 🗂️ P4P Submission Backfill\n\n`;
     md += `**Mode:** ${DRY_RUN ? "DRY RUN" : "WRITE"} · **Threads scanned:** ${scanned} · **Submissions:** ${submissions.length}`;
-    if (!DRY_RUN) md += ` · **Upserted:** ${written}${failed ? ` (${failed} failed)` : ""}`;
+    if (!DRY_RUN) md += ` · **Upserted:** ${written}${failed ? ` (${failed} failed)` : ""} · **Roster synced:** ${rosterSynced}${rosterFailed ? ` (${rosterFailed} not synced)` : ""}`;
     md += `\n\n`;
     for (const month of [...TARGET_MONTHS]) {
       const list = (perMonth[month] ?? []).sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));

@@ -229,6 +229,37 @@ export async function saveSenderMatch({
 }
 
 /**
+ * Mark a roster row as submitted without touching its score — used by the
+ * Gmail-history backfill, which recovers past submissions (already logged in
+ * p4p_submissions) but has no score to (re-)compute. Without this, backfilled
+ * submissions stay invisible on /status/ and /ranking/, which read submitted_at
+ * from the roster (YYYY_MM) table, not from p4p_submissions.
+ * Only fills the column when it's still NULL, so it never clobbers a
+ * submitted_at already set by the live pipeline (saveScore).
+ *
+ * @param {string}        date         Table name, e.g. "2569_02"
+ * @param {number|string} index        Primary key value (column "index")
+ * @param {string}        submittedAt  ISO timestamp
+ */
+export async function markRosterSubmitted(date, index, submittedAt) {
+  if (!isValidDate(date)) {
+    throw new Error(`Cannot mark submitted — invalid date key: "${date}"`);
+  }
+  if (index === null || index === undefined) {
+    throw new Error(`Cannot mark submitted — index is ${index}`);
+  }
+
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from(date)
+    .update({ submitted_at: submittedAt })
+    .eq("index", index)
+    .is("submitted_at", null);
+
+  if (error) throw new Error(`Supabase update error on table "${date}": ${error.message}`);
+}
+
+/**
  * Update the score column for a specific row identified by its primary key.
  *
  * @param {string}        date          Table name, e.g. "2569_02"
