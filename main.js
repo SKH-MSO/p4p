@@ -72,6 +72,13 @@ function clearRt(res) {
 // script -> no CSP change). No/invalid cookie -> redirect to /verify/.
 function servePage(name) {
   return async (req, res) => {
+    // Canonicalize to a trailing slash first. LIFF opens "/status" (no slash),
+    // but the page's relative <script src="app.js"> only resolves to
+    // /status/app.js when the URL ends in "/". Without this the page script
+    // 404s and never runs. (express.static used to do this redirect for us.)
+    if (!req.path.endsWith("/")) {
+      return res.redirect(302, "/" + name + "/" + req.originalUrl.slice(req.path.length))
+    }
     const ret = encodeURIComponent(req.originalUrl)
     const rt = parseCookies(req)[RT_COOKIE]
     if (!rt) return res.redirect(302, "/verify/?return=" + ret + "&reason=no_session")
