@@ -50,10 +50,30 @@
     global.location.replace("/verify/?return=" + ret)
   }
 
+  // /verify/ hands off a freshly-verified session via #p4p_at=...&p4p_rt=...
+  // instead of relying solely on this page reading /verify/'s localStorage
+  // write — some in-app browsers don't reliably carry storage across a full
+  // page navigation. If present, consume it (setSession persists it fresh in
+  // THIS page's own context) and strip it from the URL immediately.
+  function consumeHandoff() {
+    var hash = global.location.hash
+    if (!hash || hash.indexOf("p4p_at=") === -1) return null
+    var params = new URLSearchParams(hash.replace(/^#/, ""))
+    var at = params.get("p4p_at")
+    var rt = params.get("p4p_rt")
+    if (!at || !rt) return null
+    try {
+      global.history.replaceState(null, "", global.location.pathname + global.location.search)
+    } catch (e) { /* non-fatal — worst case the tokens stay visible in the URL */ }
+    return { access_token: at, refresh_token: rt }
+  }
+
+  var handoff = consumeHandoff()
+  var sessionPromise = handoff ? db.auth.setSession(handoff) : db.auth.getSession()
+
   // Resolves true only when a session is present. On no-session it redirects
   // and leaves the promise unresolved so callers gated on it never load data.
-  P4P.ready = db.auth
-    .getSession()
+  P4P.ready = sessionPromise
     .then(function (res) {
       if (res && res.data && res.data.session) {
         reveal()
