@@ -3,24 +3,43 @@
  * (status / list / ranking). Loaded after the Supabase UMD bundle + shared.js,
  * before each page's app.js.
  *
- * The server (main.js) validates the HttpOnly session cookie on every page
- * request and injects the current access token into
- *   <meta name="p4p-session" content="...">
- * before serving the HTML. This script just:
- *   1. reads that token,
- *   2. builds the Supabase data client authenticated with it (RLS enforces the
- *      allow-list), exposed as P4P.db,
- *   3. reveals the page and resolves P4P.ready.
- * There is NO client-side session storage — the LINE in-app browser doesn't
- * persist one reliably, which is why validation lives on the server.
+ * The server (main.js) validates the HttpOnly session cookie and injects the
+ * current access token into <meta name="p4p-session"> before serving the page.
+ * This script reads that token, builds the Supabase data client authenticated
+ * with it (RLS enforces the allow-list) as P4P.db, reveals the page, and
+ * resolves P4P.ready. No client-side session storage.
  *
- * If the token is missing (e.g. the page was somehow reached without the server
- * gate) it redirects to /verify/ as a fail-safe.
+ * It also surfaces any script error as an on-screen banner, because LINE's
+ * in-app browser has no console/URL bar to debug with.
  */
 (function (global) {
   "use strict"
 
   var P4P = global.P4P || (global.P4P = {})
+
+  // On-screen error banner (no console in LIFF).
+  function banner(msg) {
+    try {
+      var d = document.getElementById("p4p-err")
+      if (!d) {
+        d = document.createElement("div")
+        d.id = "p4p-err"
+        d.style.cssText =
+          "position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#c0392b;" +
+          "color:#fff;font:11px/1.4 monospace;padding:6px 8px;white-space:pre-wrap;word-break:break-all"
+        ;(document.body || document.documentElement).appendChild(d)
+      }
+      d.textContent = "ERR: " + msg
+      document.documentElement.classList.remove("p4p-unverified") // make sure it's visible
+    } catch (e) { /* nothing more we can do */ }
+  }
+  global.addEventListener("error", function (e) {
+    banner((e.message || "error") + "  @" + String(e.filename || "").split("/").pop() + ":" + e.lineno)
+  })
+  global.addEventListener("unhandledrejection", function (e) {
+    var r = e && e.reason
+    banner("promise: " + ((r && r.message) || r))
+  })
 
   // Hide the body until we confirm a token is present.
   var style = document.createElement("style")
@@ -44,12 +63,26 @@
     return
   }
 
-  // Data client authenticated with the injected user token. The `accessToken`
-  // provider is the supported way to bring your own token — supabase-js uses it
-  // for every request and disables its own (unused) session handling.
-  P4P.db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
-    accessToken: function () { return Promise.resolve(at) },
-  })
+  // Build the data client authenticated with the injected user token. Prefer the
+  // supabase-js `accessToken` provider; if this build doesn't support it, fall
+  // back to a plain Authorization header.
+  try {
+    P4P.db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
+      accessToken: function () { return Promise.resolve(at) },
+    })
+  } catch (err) {
+    banner("createClient(accessToken): " + (err && err.message))
+    try {
+      P4P.db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: "Bearer " + at } },
+      })
+    } catch (e2) {
+      banner("createClient(fallback): " + (e2 && e2.message))
+      P4P.db = null
+    }
+  }
+
   reveal()
-  P4P.ready = Promise.resolve(true)
+  P4P.ready = Promise.resolve(true) // always set, so pages' load code runs (and surfaces its own errors)
 })(window)
