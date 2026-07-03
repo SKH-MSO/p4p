@@ -1,4 +1,28 @@
       ;(function () {
+        // ── TEMP storage-persistence probe (remove once the loop is fixed) ─────
+        // Prints, on-screen, whether this webview actually persists cookies /
+        // localStorage across page loads — the counters climb on each load if
+        // storage survives, and stay at 1 if it's wiped every navigation. Also
+        // reports whether the Supabase session itself is present in each store.
+        ;(function probe() {
+            const el = document.getElementById("probe")
+            if (!el) return
+            const SB = "sb-zjeizbrzcltkgtlmkbji-auth-token"
+            // cookie counter
+            const m = document.cookie.match(/(?:^|; )p4p_probe=(\d+)/)
+            const ck = (m ? parseInt(m[1], 10) : 0) + 1
+            document.cookie = "p4p_probe=" + ck + "; path=/; max-age=86400; samesite=lax; secure"
+            const sbCk = document.cookie.indexOf(SB) !== -1 ? "Y" : "n"
+            // localStorage counter
+            let ls, sbLs
+            try {
+                ls = (parseInt(localStorage.getItem("p4p_probe") || "0", 10) || 0) + 1
+                localStorage.setItem("p4p_probe", String(ls))
+                sbLs = localStorage.getItem(SB) ? "Y" : "n"
+            } catch (e) { ls = "BLOCKED"; sbLs = "?" }
+            el.textContent = "probe  cookie=" + ck + "  local=" + ls + "   session[ck:" + sbCk + " ls:" + sbLs + "]"
+        })()
+
         // ── LINE-only guard ───────────────────────────────────────────────────
         // The data pages (status/list/ranking) only work inside the LINE app, so
         // there's no point asking a desktop/Chrome visitor to verify. Show the
