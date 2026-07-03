@@ -13,7 +13,7 @@
             return
         }
 
-        const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY)
+        const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
         // ── Return target (open-redirect safe) ────────────────────────────────
         // Only accept same-origin paths: a single leading "/" that is not "//"
@@ -90,10 +90,8 @@
         // the only way to diagnose a bounce without a computer + USB cable.
         // "no_session" is the everyday case (first visit / logged out) — silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === "handoff_failed" || bounceReason === "check_error"
-        if (bounceReason === "handoff_failed") {
-            showError("พบรหัสยืนยันแล้วแต่สร้างเซสชันไม่สำเร็จ [handoff_failed] กรุณาลองยืนยันใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
-        } else if (bounceReason === "check_error") {
+        const reasonShown = bounceReason === "check_error"
+        if (bounceReason === "check_error") {
             showError("เกิดข้อผิดพลาดขณะตรวจสอบสถานะการเข้าสู่ระบบ [check_error] กรุณาลองใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
         }
 
@@ -174,17 +172,10 @@
                 clearPending()
                 showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
 
-                // Hand the session to the destination page explicitly via the URL
-                // fragment instead of relying on it reading this page's localStorage
-                // write — some in-app browsers don't reliably carry storage across a
-                // full page navigation. The fragment is never sent to the server
-                // (unlike a query string); auth-guard.js consumes and strips it
-                // immediately on load. Same technique Supabase's own hosted
-                // magic-link flow uses.
-                const handoff = new URLSearchParams()
-                handoff.set("p4p_at", data.session.access_token)
-                handoff.set("p4p_rt", data.session.refresh_token)
-                location.replace(RETURN_TO + "#" + handoff.toString())
+                // The session is now written to cookie storage (shared.js), which
+                // persists across the navigation in LINE's in-app browser — so the
+                // destination page's auth-guard can read it. Plain redirect.
+                location.replace(RETURN_TO)
             } catch (err) {
                 console.error(err)
                 busy(codeSubmit, false, "ยืนยัน")
