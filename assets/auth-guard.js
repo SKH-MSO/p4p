@@ -1,39 +1,28 @@
 /**
- * auth-guard.js — email-verification gate for the P4P LIFF pages
- * (status / list / ranking).
+ * auth-guard.js — client half of the SERVER-side auth gate for the P4P pages
+ * (status / list / ranking). Loaded after the Supabase UMD bundle + shared.js,
+ * before each page's app.js.
  *
- * Loaded AFTER the Supabase UMD bundle and /assets/shared.js, but BEFORE each
- * page's own inline script. It:
+ * The server (main.js) validates the HttpOnly session cookie on every page
+ * request and injects the current access token into
+ *   <meta name="p4p-session" content="...">
+ * before serving the HTML. This script just:
+ *   1. reads that token,
+ *   2. builds the Supabase data client authenticated with it (RLS enforces the
+ *      allow-list), exposed as P4P.db,
+ *   3. reveals the page and resolves P4P.ready.
+ * There is NO client-side session storage — the LINE in-app browser doesn't
+ * persist one reliably, which is why validation lives on the server.
  *
- *   1. Creates the single Supabase client for the page and exposes it as
- *      `P4P.db` (pages reuse this instead of calling createClient themselves,
- *      so the persisted auth session is shared and there is only one client).
- *   2. Hides the page body until we know the visitor holds a verified session,
- *      preventing a flash of protected content before any redirect.
- *   3. Exposes `P4P.ready` — a promise that resolves to `true` once a valid
- *      Supabase session is loaded (and its access token is attached to the
- *      client, so data queries will pass Row Level Security). When there is no
- *      session it redirects to /verify/ and the promise stays pending, so the
- *      page's data load never fires.
- *
- * NOTE: this redirect is only the *cosmetic* half of the gate. The real
- * protection is RLS requiring an authenticated + allow-listed session — see
- * scripts/security-rls-auth.sql. Without that SQL applied, the anon key can
- * still read the tables directly regardless of this script.
+ * If the token is missing (e.g. the page was somehow reached without the server
+ * gate) it redirects to /verify/ as a fail-safe.
  */
 (function (global) {
   "use strict"
 
   var P4P = global.P4P || (global.P4P = {})
 
-  // Single client for the whole page. SUPABASE_OPTS points the auth session at
-  // cookie storage (see shared.js) so it survives navigation between pages in
-  // LINE's in-app browser, where localStorage does not persist reliably.
-  var db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
-  P4P.db = db
-
-  // Hide the body until verified. Using visibility (not display) keeps layout
-  // intact so revealing is instant and flicker-free.
+  // Hide the body until we confirm a token is present.
   var style = document.createElement("style")
   style.textContent = "html.p4p-unverified body{visibility:hidden!important}"
   ;(document.head || document.documentElement).appendChild(style)
@@ -43,40 +32,24 @@
     document.documentElement.classList.remove("p4p-unverified")
   }
 
-  // `reason` is a short, fixed, non-sensitive code (never raw error text/tokens)
-  // that /verify/ can show on-page. LINE's in-app browser hides the address bar,
-  // so this is the only way to see WHY we bounced without a computer + cable.
-  function toVerify(reason) {
-    var ret = encodeURIComponent(
-      global.location.pathname + global.location.search + global.location.hash
-    )
-    var url = "/verify/?return=" + ret
-    if (reason) url += "&reason=" + encodeURIComponent(reason)
-    global.location.replace(url)
+  var meta = document.querySelector('meta[name="p4p-session"]')
+  var at = meta ? (meta.getAttribute("content") || "") : ""
+
+  if (!at || at === "__P4P_ACCESS_TOKEN__") {
+    // Fail-safe: the server should have redirected already, but if not, do it.
+    var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
+    global.location.replace("/verify/?return=" + ret + "&reason=no_session")
+    P4P.db = null
+    P4P.ready = new Promise(function () {}) // never resolves — navigating away
+    return
   }
 
-  // Resolves true only when a session is present (read from cookie storage). On
-  // no-session it redirects and leaves the promise unresolved so callers gated
-  // on it never load data. The ?reason= tag is visible on /verify/ (LINE hides
-  // the address bar): "no_session" = simply not logged in (the everyday case);
-  // "check_error" = an exception while reading the session.
-  P4P.ready = db.auth
-    .getSession()
-    .then(function (res) {
-      if (res && res.data && res.data.session) {
-        reveal()
-        return true
-      }
-      if (res && res.error) {
-        console.error("P4P auth-guard: session check returned an error:", res.error)
-      }
-      toVerify("no_session")
-      return new Promise(function () {}) // never resolves — we're navigating away
-    })
-    .catch(function (err) {
-      // Fail closed: any error checking the session sends the visitor to verify.
-      console.error("P4P auth-guard: session check threw:", err)
-      toVerify("check_error")
-      return new Promise(function () {})
-    })
+  // Data client authenticated with the injected user token. The `accessToken`
+  // provider is the supported way to bring your own token — supabase-js uses it
+  // for every request and disables its own (unused) session handling.
+  P4P.db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
+    accessToken: function () { return Promise.resolve(at) },
+  })
+  reveal()
+  P4P.ready = Promise.resolve(true)
 })(window)
