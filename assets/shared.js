@@ -113,6 +113,14 @@
     },
   }
 
+  // A pass-through "lock" that just runs the callback. supabase-js v2 defaults
+  // to the Web Locks API (navigator.locks) to serialize auth/storage access,
+  // but LINE's in-app (LIFF) webview doesn't honor it — the lock never resolves,
+  // so the session-save after verifyOtp hangs and never reaches storage (the
+  // page shows success but the next page finds no session -> endless loop back
+  // to /verify/). Disabling the lock makes persistence run synchronously.
+  function noopLock(_name, _acquireTimeout, fn) { return fn() }
+
   // Options every Supabase client in this app should share so the auth session
   // persists in cookies. Pass as the 3rd arg to supabase.createClient(...).
   var SUPABASE_OPTS = {
@@ -120,6 +128,7 @@
       storage: cookieStorage,
       persistSession: true,
       autoRefreshToken: true,
+      lock: noopLock,
     },
   }
 

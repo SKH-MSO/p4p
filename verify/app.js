@@ -206,11 +206,19 @@
                 if (error) throw error
                 if (!data.session) throw new Error("verifyOtp returned no session")
                 clearPending()
-                showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
 
-                // The session is now written to cookie storage (shared.js), which
-                // persists across the navigation in LINE's in-app browser — so the
-                // destination page's auth-guard can read it. Plain redirect.
+                // Confirm the session actually landed in storage BEFORE navigating.
+                // supabase-js persists asynchronously; with the Web Locks bypass
+                // (shared.js) this now completes, but we re-read it to be certain —
+                // if it didn't persist, navigating would just loop back here, so
+                // show a clear error instead of a silent loop.
+                const { data: check } = await db.auth.getSession()
+                if (!check.session) {
+                    busy(codeSubmit, false, "ยืนยัน")
+                    showError("บันทึกเซสชันไม่สำเร็จ กรุณาลองใหม่อีกครั้ง [persist]")
+                    return
+                }
+                showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
                 location.replace(RETURN_TO)
             } catch (err) {
                 console.error(err)
