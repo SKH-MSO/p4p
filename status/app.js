@@ -1,7 +1,5 @@
         // ── Supabase (client + verification gate from /assets/auth-guard.js) ──
         const db = P4P.db
-        const D = window.P4PDIAG || (() => {})
-        D("status: app.js running, db=" + (db ? "set" : "NULL") + ", P4P.ready=" + typeof (P4P.ready && P4P.ready.then))
 
         // Inline status icons (replaces FontAwesome, so CSP needs no external
         // script). stroke=currentColor so the .icon-notset color rule applies.
@@ -156,7 +154,6 @@
 
         // ── Main ──────────────────────────────────────────────────────────────
         const main = async () => {
-            D("status: main() running, sheetname=" + par_sheetname)
             if (!/Line\//i.test(navigator.userAgent)) {
                 if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
                     desktopBlock.querySelector("h2").textContent = "กรุณาเปิดผ่าน LINE application"
@@ -185,8 +182,6 @@
                 const supaResp = await db.from(par_sheetname)
                     .select("firstname, lastname, department, submitted_at")
 
-                D("status: query returned err=" + (supaResp.error ? supaResp.error.message : "none") +
-                  " rows=" + (supaResp.data ? supaResp.data.length : "null"))
                 if (supaResp.error) throw new Error("Supabase: " + supaResp.error.message)
 
                 const referenceRows = supaResp.data                     // rows from the month table
@@ -285,5 +280,4 @@
 
         // Only load data once the verification gate confirms a valid session
         // (P4P.ready never resolves when unverified — it redirects to /verify/).
-        D("status: registering main() on P4P.ready")
-        P4P.ready.then(() => main()).catch((e) => D("status: P4P.ready rejected: " + e, true))
+        P4P.ready.then(() => main())
