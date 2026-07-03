@@ -45,6 +45,13 @@ const EXEMPT_DEPTS = new Set(["INTERN"]);
 // Wider than the old fixed 3-month display window so a department that falls
 // behind (submits weeks/months late) still gets caught up automatically.
 const CATCHUP_WINDOW_MONTHS = 12;
+// Never scan earlier than this month key, even if it's within the window
+// above. Months before this are out of scope for the automated catch-up —
+// pre-existing gaps back there (e.g. a month sitting at 0 submissions from
+// before the tracker's cutover) would otherwise permanently block every
+// later completed month from ever being reported (selectMonthsToSend always
+// stops at the first incomplete month it finds).
+const CATCHUP_START_MONTH = "2569_04";
 
 // ── Test-mode overrides (manual workflow_dispatch only, see score-tracker.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
@@ -236,11 +243,15 @@ async function main() {
 
   console.log(`\n${"═".repeat(62)}`);
   console.log(`  P4P Score Tracker  —  ${todayStr}`);
-  console.log(`  Catch-up window: last ${CATCHUP_WINDOW_MONTHS} months`);
+  console.log(`  Catch-up window: last ${CATCHUP_WINDOW_MONTHS} months, not before ${tableKeyToDisplay(CATCHUP_START_MONTH)}`);
   console.log(`${"═".repeat(62)}\n`);
 
-  const monthsDesc = getPreviousMonths(CATCHUP_WINDOW_MONTHS); // most-recent first
+  // most-recent first, floored at CATCHUP_START_MONTH so older stale gaps
+  // (e.g. a month stuck at 0 submissions from before the tracker's cutover)
+  // can't permanently block every later completed month
+  const monthsDesc = getPreviousMonths(CATCHUP_WINDOW_MONTHS).filter(key => key >= CATCHUP_START_MONTH);
   const monthsAsc  = [...monthsDesc].reverse();                // oldest first — scan order
+  if (!monthsAsc.length) { console.log(`⚠️  No months in range (CATCHUP_START_MONTH ${CATCHUP_START_MONTH} is outside the ${CATCHUP_WINDOW_MONTHS}-month window) — nothing to do.`); return; }
   const sb         = createSB();
   const gmail      = createGmailClient();
   const DEPT_HEADS = await getDeptHeads();
