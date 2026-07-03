@@ -26,9 +26,10 @@
 
   var P4P = global.P4P || (global.P4P = {})
 
-  // Single client for the whole page. SUPABASE_OPTS points the auth session at
-  // cookie storage (see shared.js) so it survives navigation between pages in
-  // LINE's in-app browser, where localStorage does not persist reliably.
+  // Single client for the whole page. We do NOT use supabase-js session
+  // persistence (broken in LINE's webview); instead we read the tokens WE saved
+  // in a cookie (shared.js) and hydrate this page's client in memory via
+  // setSession() below.
   var db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
   P4P.db = db
 
@@ -55,28 +56,35 @@
     global.location.replace(url)
   }
 
-  // Resolves true only when a session is present (read from cookie storage). On
-  // no-session it redirects and leaves the promise unresolved so callers gated
-  // on it never load data. The ?reason= tag is visible on /verify/ (LINE hides
-  // the address bar): "no_session" = simply not logged in (the everyday case);
-  // "check_error" = an exception while reading the session.
-  P4P.ready = db.auth
-    .getSession()
-    .then(function (res) {
-      if (res && res.data && res.data.session) {
-        reveal()
-        return true
-      }
-      if (res && res.error) {
-        console.error("P4P auth-guard: session check returned an error:", res.error)
-      }
-      toVerify("no_session")
-      return new Promise(function () {}) // never resolves — we're navigating away
-    })
-    .catch(function (err) {
-      // Fail closed: any error checking the session sends the visitor to verify.
-      console.error("P4P auth-guard: session check threw:", err)
-      toVerify("check_error")
-      return new Promise(function () {})
-    })
+  // Read the tokens we persisted ourselves. No cookie / expired -> verify.
+  // Otherwise hydrate THIS page's client in memory with setSession() so its
+  // queries carry the user's JWT (RLS). We never depend on supabase-js having
+  // persisted anything across the navigation. ?reason= is visible on /verify/
+  // (LINE hides the address bar): no_session / expired / check_error.
+  var saved = P4P.readSession()
+  if (!saved) {
+    toVerify("no_session")
+    P4P.ready = new Promise(function () {})
+  } else if (P4P.sessionExpired(saved)) {
+    P4P.clearSession()
+    toVerify("expired")
+    P4P.ready = new Promise(function () {})
+  } else {
+    P4P.ready = db.auth
+      .setSession({ access_token: saved.access_token, refresh_token: saved.refresh_token })
+      .then(function (res) {
+        if (res && res.data && res.data.session) {
+          reveal()
+          return true
+        }
+        if (res && res.error) console.error("P4P auth-guard: setSession error:", res.error)
+        toVerify("persist")
+        return new Promise(function () {})
+      })
+      .catch(function (err) {
+        console.error("P4P auth-guard: setSession threw:", err)
+        toVerify("check_error")
+        return new Promise(function () {})
+      })
+  }
 })(window)

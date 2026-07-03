@@ -7,20 +7,19 @@
         ;(function probe() {
             const el = document.getElementById("probe")
             if (!el) return
-            const SB = "sb-zjeizbrzcltkgtlmkbji-auth-token"
             // cookie counter
             const m = document.cookie.match(/(?:^|; )p4p_probe=(\d+)/)
             const ck = (m ? parseInt(m[1], 10) : 0) + 1
             document.cookie = "p4p_probe=" + ck + "; path=/; max-age=86400; samesite=lax; secure"
-            const sbCk = document.cookie.indexOf(SB) !== -1 ? "Y" : "n"
             // localStorage counter
-            let ls, sbLs
+            let ls
             try {
                 ls = (parseInt(localStorage.getItem("p4p_probe") || "0", 10) || 0) + 1
                 localStorage.setItem("p4p_probe", String(ls))
-                sbLs = localStorage.getItem(SB) ? "Y" : "n"
-            } catch (e) { ls = "BLOCKED"; sbLs = "?" }
-            el.textContent = "probe  cookie=" + ck + "  local=" + ls + "   session[ck:" + sbCk + " ls:" + sbLs + "]"
+            } catch (e) { ls = "BLOCKED" }
+            // Is OUR saved session present in the cookie? (Y right after entering OTP.)
+            const sess = document.cookie.indexOf("p4p_session=") !== -1 ? "Y" : "n"
+            el.textContent = "probe  cookie=" + ck + "  local=" + ls + "   our_session:" + sess
         })()
 
         // ── LINE-only guard ───────────────────────────────────────────────────
@@ -119,16 +118,19 @@
             showError("เกิดข้อผิดพลาดขณะตรวจสอบสถานะการเข้าสู่ระบบ [check_error] กรุณาลองใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
         }
 
-        // Already verified? Skip straight to the page they wanted. Otherwise, if a
-        // verification was in progress before a reload, restore the code step.
-        db.auth.getSession().then(({ data }) => {
-            if (data.session) { location.replace(RETURN_TO); return }
+        // Already verified (our cookie has a live session)? Skip straight to the
+        // page they wanted. Otherwise, if a verification was in progress before a
+        // reload, restore the code step.
+        const existing = P4P.readSession()
+        if (existing && !P4P.sessionExpired(existing)) {
+            location.replace(RETURN_TO)
+        } else {
             const pendingEmail = readPending()
             if (pendingEmail) {
                 goToCodeStep(pendingEmail)
                 if (!reasonShown) showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
             }
-        })
+        }
 
         // ── Step 1 — request an OTP ───────────────────────────────────────────
         emailStep.addEventListener("submit", async (e) => {
@@ -207,13 +209,12 @@
                 if (!data.session) throw new Error("verifyOtp returned no session")
                 clearPending()
 
-                // Confirm the session actually landed in storage BEFORE navigating.
-                // supabase-js persists asynchronously; with the Web Locks bypass
-                // (shared.js) this now completes, but we re-read it to be certain —
-                // if it didn't persist, navigating would just loop back here, so
-                // show a clear error instead of a silent loop.
-                const { data: check } = await db.auth.getSession()
-                if (!check.session) {
+                // Persist the session OURSELVES (supabase-js's own persistence is
+                // broken in LINE's webview). Write it to our cookie and confirm it
+                // reads back before navigating — if not, show a clear error instead
+                // of a silent loop.
+                P4P.saveSession(data.session)
+                if (!P4P.readSession()) {
                     busy(codeSubmit, false, "ยืนยัน")
                     showError("บันทึกเซสชันไม่สำเร็จ กรุณาลองใหม่อีกครั้ง [persist]")
                     return

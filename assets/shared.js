@@ -121,22 +121,50 @@
   // to /verify/). Disabling the lock makes persistence run synchronously.
   function noopLock(_name, _acquireTimeout, fn) { return fn() }
 
-  // Options every Supabase client in this app should share so the auth session
-  // persists in cookies. Pass as the 3rd arg to supabase.createClient(...).
+  // supabase-js's OWN session persistence does not work in LINE's LIFF webview
+  // (verified: storage persists, yet the session is written to neither cookies
+  // nor localStorage after verifyOtp). So we DON'T rely on it — persistSession
+  // is off, and we persist the tokens ourselves in a cookie (below), rehydrating
+  // each page's client in-memory via setSession(). lock stays disabled too.
   var SUPABASE_OPTS = {
     auth: {
-      storage: cookieStorage,
-      persistSession: true,
-      autoRefreshToken: true,
+      persistSession: false,
+      autoRefreshToken: false,
       lock: noopLock,
     },
   }
+
+  // ── Our own session persistence (cookie, survives LIFF navigations) ──────
+  var SESSION_KEY = "p4p_session"
+  function saveSession(session) {
+    if (!session || !session.access_token) return
+    cookieStorage.setItem(SESSION_KEY, JSON.stringify({
+      access_token: session.access_token,
+      refresh_token: session.refresh_token,
+      expires_at: session.expires_at || null, // unix seconds
+    }))
+  }
+  function readSession() {
+    try {
+      var s = JSON.parse(cookieStorage.getItem(SESSION_KEY) || "null")
+      if (!s || !s.access_token) return null
+      return s
+    } catch (e) { return null }
+  }
+  function sessionExpired(s) {
+    return !!(s && s.expires_at && s.expires_at * 1000 < Date.now())
+  }
+  function clearSession() { cookieStorage.removeItem(SESSION_KEY) }
 
   global.P4P = {
     SUPABASE_URL: SUPABASE_URL,
     SUPABASE_KEY: SUPABASE_KEY,
     SUPABASE_OPTS: SUPABASE_OPTS,
     COOKIE_STORAGE: cookieStorage,
+    saveSession: saveSession,
+    readSession: readSession,
+    sessionExpired: sessionExpired,
+    clearSession: clearSession,
     COLOR_ARRAY: COLOR_ARRAY,
     THAI_MONTHS: THAI_MONTHS,
     THAI_MONTHS_SHORT: THAI_MONTHS_SHORT,
