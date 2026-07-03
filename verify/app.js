@@ -112,6 +112,11 @@
             clearMsg()
             const email = emailInput.value.trim().toLowerCase()
             if (!email) return
+            // Email-format check before hitting the server.
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                showError("กรุณากรอกอีเมลให้ถูกต้อง")
+                return
+            }
             busy(emailSubmit, true, "กำลังส่ง...")
             try {
                 // Only allow-listed physicians (in physician_directory or
@@ -149,6 +154,13 @@
                 busy(emailSubmit, false, "ส่งรหัสยืนยัน")
                 showError("ส่งรหัสไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
             }
+        })
+
+        // Keep the OTP field to digits only (max 6) — strips anything pasted or
+        // typed that isn't 0-9, so the field can only ever hold a valid code.
+        codeInput.addEventListener("input", () => {
+            const cleaned = codeInput.value.replace(/\D/g, "").slice(0, 6)
+            if (cleaned !== codeInput.value) codeInput.value = cleaned
         })
 
         // ── Step 2 — verify the OTP ───────────────────────────────────────────
