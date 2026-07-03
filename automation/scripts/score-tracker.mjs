@@ -303,13 +303,17 @@ async function main() {
       console.log(`└─ พร้อมส่ง: ${toSend.map(m => tableKeyToDisplay(m.key)).join(", ")}\n`);
       deptToSend.set(dept, toSend.map(({ key, status }) => ({ key, displayName: tableKeyToDisplay(key), status })));
     } else {
-      // Find the oldest unsent month (if any) to explain why nothing's going out.
-      const oldestUnsent = monthsWithStatus.find(({ key }) => !alreadySent.has(key));
-      const note = !oldestUnsent
+      // Explain why nothing's going out. selectMonthsToSend skips null-status
+      // (no data) months without blocking, so the real gap — if any — is the
+      // oldest unsent month that actually HAS data (mirrors its own logic;
+      // a plain "oldest unsent" would wrongly blame a no-data month instead).
+      const anyUnsent = monthsWithStatus.some(({ key }) => !alreadySent.has(key));
+      const oldestUnsentWithData = monthsWithStatus.find(({ key, status }) => !alreadySent.has(key) && status !== null);
+      const note = !anyUnsent
         ? "ส่งครบแล้วทุกเดือนในช่วงที่ตรวจสอบ"
-        : oldestUnsent.status === null
+        : !oldestUnsentWithData
           ? "ไม่มีข้อมูลใหม่"
-          : `รอข้อมูลให้ครบ (${tableKeyToDisplay(oldestUnsent.key)} ค้าง ${oldestUnsent.status.missing}/${oldestUnsent.status.total})`;
+          : `รอข้อมูลให้ครบ (${tableKeyToDisplay(oldestUnsentWithData.key)} ค้าง ${oldestUnsentWithData.status.missing}/${oldestUnsentWithData.status.total})`;
       blockedNote.set(dept, note);
       console.log(`└─ ไม่มีเดือนใหม่ที่พร้อมส่ง — ${note}\n`);
     }
