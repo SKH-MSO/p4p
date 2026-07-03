@@ -43,11 +43,16 @@
     document.documentElement.classList.remove("p4p-unverified")
   }
 
-  function toVerify() {
+  // `reason` is a short, fixed, non-sensitive code (never raw error text/tokens)
+  // that /verify/ can show on-page. LINE's in-app browser hides the address bar,
+  // so this is the only way to see WHY we bounced without a computer + cable.
+  function toVerify(reason) {
     var ret = encodeURIComponent(
       global.location.pathname + global.location.search + global.location.hash
     )
-    global.location.replace("/verify/?return=" + ret)
+    var url = "/verify/?return=" + ret
+    if (reason) url += "&reason=" + encodeURIComponent(reason)
+    global.location.replace(url)
   }
 
   // /verify/ hands off a freshly-verified session via #p4p_at=...&p4p_rt=...
@@ -73,18 +78,26 @@
 
   // Resolves true only when a session is present. On no-session it redirects
   // and leaves the promise unresolved so callers gated on it never load data.
+  // reason "handoff_failed" = a fresh OTP handoff arrived but setSession()
+  // rejected it (session establishment itself is failing, not storage).
+  // reason "no_session" = no handoff was present and there's simply no
+  // existing session (the everyday case for a first-time / logged-out visit).
   P4P.ready = sessionPromise
     .then(function (res) {
       if (res && res.data && res.data.session) {
         reveal()
         return true
       }
-      toVerify()
+      if (res && res.error) {
+        console.error("P4P auth-guard: session check returned an error:", res.error)
+      }
+      toVerify(handoff ? "handoff_failed" : "no_session")
       return new Promise(function () {}) // never resolves — we're navigating away
     })
-    .catch(function () {
+    .catch(function (err) {
       // Fail closed: any error checking the session sends the visitor to verify.
-      toVerify()
+      console.error("P4P auth-guard: session check threw:", err)
+      toVerify("check_error")
       return new Promise(function () {})
     })
 })(window)

@@ -85,6 +85,18 @@
             codeInput.focus()
         }
 
+        // ── Surface WHY auth-guard bounced us back here, if it did ─────────────
+        // LINE's in-app browser hides the address bar, so this on-page message is
+        // the only way to diagnose a bounce without a computer + USB cable.
+        // "no_session" is the everyday case (first visit / logged out) — silent.
+        const bounceReason = new URLSearchParams(location.search).get("reason")
+        const reasonShown = bounceReason === "handoff_failed" || bounceReason === "check_error"
+        if (bounceReason === "handoff_failed") {
+            showError("พบรหัสยืนยันแล้วแต่สร้างเซสชันไม่สำเร็จ [handoff_failed] กรุณาลองยืนยันใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
+        } else if (bounceReason === "check_error") {
+            showError("เกิดข้อผิดพลาดขณะตรวจสอบสถานะการเข้าสู่ระบบ [check_error] กรุณาลองใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
+        }
+
         // Already verified? Skip straight to the page they wanted. Otherwise, if a
         // verification was in progress before a reload, restore the code step.
         db.auth.getSession().then(({ data }) => {
@@ -92,7 +104,7 @@
             const pendingEmail = readPending()
             if (pendingEmail) {
                 goToCodeStep(pendingEmail)
-                showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
+                if (!reasonShown) showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
             }
         })
 
