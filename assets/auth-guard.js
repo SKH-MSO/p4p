@@ -51,11 +51,17 @@
     document.documentElement.classList.remove("p4p-unverified")
   }
 
+  var D = global.P4PDIAG || function () {}
+  D("guard: start")
+
   var meta = document.querySelector('meta[name="p4p-session"]')
   var at = meta ? (meta.getAttribute("content") || "") : ""
+  D("guard: meta " + (meta ? "found" : "MISSING") + ", token " +
+    (!at ? "EMPTY" : at === "__P4P_ACCESS_TOKEN__" ? "UNFILLED-PLACEHOLDER" : "present(len " + at.length + ")"))
 
   if (!at || at === "__P4P_ACCESS_TOKEN__") {
     // Fail-safe: the server should have redirected already, but if not, do it.
+    D("guard: no token -> redirecting to /verify", true)
     var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
     global.location.replace("/verify/?return=" + ret + "&reason=no_session")
     P4P.db = null
@@ -83,6 +89,7 @@
     }
   }
 
+  D("guard: client " + (P4P.db ? "created" : "NULL") + " -> revealing + resolving P4P.ready")
   reveal()
   P4P.ready = Promise.resolve(true) // always set, so pages' load code runs (and surfaces its own errors)
 })(window)
