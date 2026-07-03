@@ -26,10 +26,10 @@
 
   var P4P = global.P4P || (global.P4P = {})
 
-  // Single client for the whole page. persistSession/autoRefreshToken default
-  // to true, so the session survives navigation between the three pages
-  // (same origin => same localStorage).
-  var db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY)
+  // Single client for the whole page. SUPABASE_OPTS points the auth session at
+  // cookie storage (see shared.js) so it survives navigation between pages in
+  // LINE's in-app browser, where localStorage does not persist reliably.
+  var db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
   P4P.db = db
 
   // Hide the body until verified. Using visibility (not display) keeps layout
@@ -55,34 +55,13 @@
     global.location.replace(url)
   }
 
-  // /verify/ hands off a freshly-verified session via #p4p_at=...&p4p_rt=...
-  // instead of relying solely on this page reading /verify/'s localStorage
-  // write — some in-app browsers don't reliably carry storage across a full
-  // page navigation. If present, consume it (setSession persists it fresh in
-  // THIS page's own context) and strip it from the URL immediately.
-  function consumeHandoff() {
-    var hash = global.location.hash
-    if (!hash || hash.indexOf("p4p_at=") === -1) return null
-    var params = new URLSearchParams(hash.replace(/^#/, ""))
-    var at = params.get("p4p_at")
-    var rt = params.get("p4p_rt")
-    if (!at || !rt) return null
-    try {
-      global.history.replaceState(null, "", global.location.pathname + global.location.search)
-    } catch (e) { /* non-fatal — worst case the tokens stay visible in the URL */ }
-    return { access_token: at, refresh_token: rt }
-  }
-
-  var handoff = consumeHandoff()
-  var sessionPromise = handoff ? db.auth.setSession(handoff) : db.auth.getSession()
-
-  // Resolves true only when a session is present. On no-session it redirects
-  // and leaves the promise unresolved so callers gated on it never load data.
-  // reason "handoff_failed" = a fresh OTP handoff arrived but setSession()
-  // rejected it (session establishment itself is failing, not storage).
-  // reason "no_session" = no handoff was present and there's simply no
-  // existing session (the everyday case for a first-time / logged-out visit).
-  P4P.ready = sessionPromise
+  // Resolves true only when a session is present (read from cookie storage). On
+  // no-session it redirects and leaves the promise unresolved so callers gated
+  // on it never load data. The ?reason= tag is visible on /verify/ (LINE hides
+  // the address bar): "no_session" = simply not logged in (the everyday case);
+  // "check_error" = an exception while reading the session.
+  P4P.ready = db.auth
+    .getSession()
     .then(function (res) {
       if (res && res.data && res.data.session) {
         reveal()
@@ -91,7 +70,7 @@
       if (res && res.error) {
         console.error("P4P auth-guard: session check returned an error:", res.error)
       }
-      toVerify(handoff ? "handoff_failed" : "no_session")
+      toVerify("no_session")
       return new Promise(function () {}) // never resolves — we're navigating away
     })
     .catch(function (err) {
