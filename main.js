@@ -26,6 +26,74 @@ const {
   MONTH_ITERATOR: month_iterator,
 } = require("./src/constants.cjs")
 
+// ── Server-side session validation ───────────────────────────────────────
+// The LINE (LIFF) in-app browser does not persist a client-side Supabase
+// session across navigations, so the browser can't hold the auth token. Instead
+// the SERVER validates the session: after the client verifies its OTP it posts
+// the tokens here; we keep the refresh token in an HttpOnly cookie and, on every
+// gated page request, exchange it for a fresh access token which we inject into
+// the page. The browser only ever holds a short-lived access token in memory.
+const fs = require("node:fs")
+const path = require("node:path")
+const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
+const SUPABASE_ANON = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
+const RT_COOKIE = "p4p_rt"
+const COOKIE_BASE = "HttpOnly; Secure; SameSite=Lax; Path=/"
+const PAGE_TOKEN_PLACEHOLDER = "__P4P_ACCESS_TOKEN__"
+
+// Gated pages cached as templates; the server fills the token placeholder per
+// request. Files never change at runtime.
+const gatedPages = ["status", "list", "ranking"]
+const pageTemplates = {}
+for (const p of gatedPages) {
+  pageTemplates[p] = fs.readFileSync(path.join(__dirname, p, "index.html"), "utf8")
+}
+
+function parseCookies(req) {
+  const out = {}
+  const raw = req.headers.cookie
+  if (!raw) return out
+  for (const part of raw.split(";")) {
+    const i = part.indexOf("=")
+    if (i === -1) continue
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim())
+  }
+  return out
+}
+function setRt(res, rt) {
+  res.append("Set-Cookie", RT_COOKIE + "=" + encodeURIComponent(rt) + "; " + COOKIE_BASE + "; Max-Age=34560000")
+}
+function clearRt(res) {
+  res.append("Set-Cookie", RT_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
+}
+
+// Serve a gated page: require a valid refresh cookie, exchange it for a fresh
+// access token, rotate the cookie, and inject the token via <meta> (no inline
+// script -> no CSP change). No/invalid cookie -> redirect to /verify/.
+function servePage(name) {
+  return async (req, res) => {
+    const ret = encodeURIComponent(req.originalUrl)
+    const rt = parseCookies(req)[RT_COOKIE]
+    if (!rt) return res.redirect(302, "/verify/?return=" + ret + "&reason=no_session")
+    let at
+    try {
+      const r = await axios.post(
+        SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token",
+        { refresh_token: rt },
+        { headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
+      )
+      at = r.data && r.data.access_token
+      if (!at) throw new Error("no access_token in refresh response")
+      setRt(res, r.data.refresh_token || rt) // rotate
+    } catch (e) {
+      clearRt(res)
+      return res.redirect(302, "/verify/?return=" + ret + "&reason=expired")
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8")
+    res.send(pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at))
+  }
+}
+
 // Security headers for the web UI. The Content-Security-Policy makes the
 // email-verification gate more than cosmetic against XSS: script-src is limited
 // to our own origin + the Supabase CDN, with NO 'unsafe-inline', so an injected
@@ -50,6 +118,30 @@ app.use((req, res, next) => {
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin")
   next()
 })
+
+// Client posts the tokens from its (working) client-side verifyOtp; we validate
+// the access token, then stash the refresh token in an HttpOnly cookie.
+app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
+  const { access_token, refresh_token } = req.body || {}
+  if (!access_token || !refresh_token) return res.status(400).json({ error: "missing tokens" })
+  try {
+    await axios.get(SUPABASE_URL + "/auth/v1/user", {
+      headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + access_token }, timeout: 8000,
+    })
+  } catch (e) {
+    return res.status(401).json({ error: "invalid token" })
+  }
+  setRt(res, refresh_token)
+  res.json({ ok: true })
+})
+app.post("/auth/logout", (req, res) => { clearRt(res); res.json({ ok: true }) })
+
+// Gated pages: server-validated + token injected (must be registered BEFORE the
+// static mounts so "/status/" hits the handler, while "/status/app.js" etc.
+// fall through to the static mount below).
+for (const p of gatedPages) {
+  app.get(["/" + p, "/" + p + "/"], servePage(p))
+}
 
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))

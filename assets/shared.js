@@ -52,119 +52,21 @@
       .replace(/'/g, "&#39;") // also safe inside single-quoted attributes
   }
 
-  // ── Cookie-backed storage for the Supabase auth session ──────────────────
-  // LINE's in-app (LIFF) browser does NOT reliably persist localStorage across
-  // full page navigations — a session written on /verify/ was gone by the time
-  // status/list/ranking loaded, causing an endless redirect back to /verify/.
-  // Cookies survive where localStorage doesn't, so we point Supabase's auth
-  // `storage` at this adapter (used identically by auth-guard.js and the verify
-  // page, so the session written by one is read by the others).
-  //
-  // A Supabase session JSON can exceed a single cookie's ~4KB limit, so values
-  // are split into chunks: the base name holds the chunk COUNT, and <name>.<i>
-  // holds each URL-encoded chunk. Each raw chunk is encoded independently so a
-  // split never lands mid-escape-sequence.
-  var COOKIE_ATTRS = "; path=/; max-age=34560000; samesite=lax; secure" // ~400 days
-  var CHUNK = 1800 // raw chars/chunk; encoded stays well under the 4KB cookie cap
-
-  function rawRead(name) {
-    var m = document.cookie.match(
-      new RegExp("(?:^|; )" + name.replace(/([.$?*|{}()[\]\\+^])/g, "\\$1") + "=([^;]*)")
-    )
-    return m ? m[1] : null
-  }
-  function rawWrite(name, encodedValue) {
-    document.cookie = name + "=" + encodedValue + COOKIE_ATTRS
-  }
-  function expire(name) {
-    document.cookie = name + "=; path=/; max-age=0; samesite=lax; secure"
-  }
-
-  var cookieStorage = {
-    getItem: function (key) {
-      var head = rawRead(key)
-      if (head === null) return null
-      var n = parseInt(decodeURIComponent(head), 10)
-      if (!isFinite(n) || n < 1) return null
-      var out = ""
-      for (var i = 0; i < n; i++) {
-        var part = rawRead(key + "." + i)
-        if (part === null) return null // incomplete — treat as missing
-        out += decodeURIComponent(part)
-      }
-      return out
-    },
-    setItem: function (key, value) {
-      cookieStorage.removeItem(key) // clear any previous (possibly longer) value
-      value = String(value)
-      var n = Math.max(1, Math.ceil(value.length / CHUNK))
-      rawWrite(key, encodeURIComponent(String(n)))
-      for (var i = 0; i < n; i++) {
-        rawWrite(key + "." + i, encodeURIComponent(value.slice(i * CHUNK, (i + 1) * CHUNK)))
-      }
-    },
-    removeItem: function (key) {
-      var head = rawRead(key)
-      if (head !== null) {
-        var n = parseInt(decodeURIComponent(head), 10)
-        if (isFinite(n)) for (var i = 0; i < n; i++) expire(key + "." + i)
-      }
-      expire(key)
-    },
-  }
-
-  // A pass-through "lock" that just runs the callback. supabase-js v2 defaults
-  // to the Web Locks API (navigator.locks) to serialize auth/storage access,
-  // but LINE's in-app (LIFF) webview doesn't honor it — the lock never resolves,
-  // so the session-save after verifyOtp hangs and never reaches storage (the
-  // page shows success but the next page finds no session -> endless loop back
-  // to /verify/). Disabling the lock makes persistence run synchronously.
-  function noopLock(_name, _acquireTimeout, fn) { return fn() }
-
-  // supabase-js's OWN session persistence does not work in LINE's LIFF webview
-  // (verified: storage persists, yet the session is written to neither cookies
-  // nor localStorage after verifyOtp). So we DON'T rely on it — persistSession
-  // is off, and we persist the tokens ourselves in a cookie (below), rehydrating
-  // each page's client in-memory via setSession(). lock stays disabled too.
+  // Auth is validated SERVER-side (see main.js): the verify page uses
+  // supabase.auth only to run the OTP, then posts the tokens to /auth/session.
+  // The data pages get a token injected by the server and never touch auth.
+  // persistSession is off because no client-side session is kept anywhere.
   var SUPABASE_OPTS = {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
-      lock: noopLock,
     },
   }
-
-  // ── Our own session persistence (cookie, survives LIFF navigations) ──────
-  var SESSION_KEY = "p4p_session"
-  function saveSession(session) {
-    if (!session || !session.access_token) return
-    cookieStorage.setItem(SESSION_KEY, JSON.stringify({
-      access_token: session.access_token,
-      refresh_token: session.refresh_token,
-      expires_at: session.expires_at || null, // unix seconds
-    }))
-  }
-  function readSession() {
-    try {
-      var s = JSON.parse(cookieStorage.getItem(SESSION_KEY) || "null")
-      if (!s || !s.access_token) return null
-      return s
-    } catch (e) { return null }
-  }
-  function sessionExpired(s) {
-    return !!(s && s.expires_at && s.expires_at * 1000 < Date.now())
-  }
-  function clearSession() { cookieStorage.removeItem(SESSION_KEY) }
 
   global.P4P = {
     SUPABASE_URL: SUPABASE_URL,
     SUPABASE_KEY: SUPABASE_KEY,
     SUPABASE_OPTS: SUPABASE_OPTS,
-    COOKIE_STORAGE: cookieStorage,
-    saveSession: saveSession,
-    readSession: readSession,
-    sessionExpired: sessionExpired,
-    clearSession: clearSession,
     COLOR_ARRAY: COLOR_ARRAY,
     THAI_MONTHS: THAI_MONTHS,
     THAI_MONTHS_SHORT: THAI_MONTHS_SHORT,

@@ -1,27 +1,4 @@
       ;(function () {
-        // ── TEMP storage-persistence probe (remove once the loop is fixed) ─────
-        // Prints, on-screen, whether this webview actually persists cookies /
-        // localStorage across page loads — the counters climb on each load if
-        // storage survives, and stay at 1 if it's wiped every navigation. Also
-        // reports whether the Supabase session itself is present in each store.
-        ;(function probe() {
-            const el = document.getElementById("probe")
-            if (!el) return
-            // cookie counter
-            const m = document.cookie.match(/(?:^|; )p4p_probe=(\d+)/)
-            const ck = (m ? parseInt(m[1], 10) : 0) + 1
-            document.cookie = "p4p_probe=" + ck + "; path=/; max-age=86400; samesite=lax; secure"
-            // localStorage counter
-            let ls
-            try {
-                ls = (parseInt(localStorage.getItem("p4p_probe") || "0", 10) || 0) + 1
-                localStorage.setItem("p4p_probe", String(ls))
-            } catch (e) { ls = "BLOCKED" }
-            // Is OUR saved session present in the cookie? (Y right after entering OTP.)
-            const sess = document.cookie.indexOf("p4p_session=") !== -1 ? "Y" : "n"
-            el.textContent = "probe  cookie=" + ck + "  local=" + ls + "   our_session:" + sess
-        })()
-
         // ── LINE-only guard ───────────────────────────────────────────────────
         // The data pages (status/list/ranking) only work inside the LINE app, so
         // there's no point asking a desktop/Chrome visitor to verify. Show the
@@ -108,28 +85,19 @@
             codeInput.focus()
         }
 
-        // ── Surface WHY auth-guard bounced us back here, if it did ─────────────
-        // LINE's in-app browser hides the address bar, so this on-page message is
-        // the only way to diagnose a bounce without a computer + USB cable.
-        // "no_session" is the everyday case (first visit / logged out) — silent.
+        // Why did the server send us here? "expired" = the session lapsed;
+        // "no_session" is the everyday logged-out case and stays silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === "check_error"
-        if (bounceReason === "check_error") {
-            showError("เกิดข้อผิดพลาดขณะตรวจสอบสถานะการเข้าสู่ระบบ [check_error] กรุณาลองใหม่อีกครั้ง หากยังพบปัญหา กรุณาแจ้งผู้ดูแลระบบพร้อมรหัสนี้")
+        const reasonShown = bounceReason === "expired"
+        if (bounceReason === "expired") {
+            showNotice("เซสชันหมดอายุ กรุณายืนยันตัวตนอีกครั้ง")
         }
 
-        // Already verified (our cookie has a live session)? Skip straight to the
-        // page they wanted. Otherwise, if a verification was in progress before a
-        // reload, restore the code step.
-        const existing = P4P.readSession()
-        if (existing && !P4P.sessionExpired(existing)) {
-            location.replace(RETURN_TO)
-        } else {
-            const pendingEmail = readPending()
-            if (pendingEmail) {
-                goToCodeStep(pendingEmail)
-                if (!reasonShown) showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
-            }
+        // If a verification was in progress before a reload, restore the code step.
+        const pendingEmail = readPending()
+        if (pendingEmail) {
+            goToCodeStep(pendingEmail)
+            if (!reasonShown) showOk("กรุณากรอกรหัสยืนยันที่ส่งไปยังอีเมลของท่าน")
         }
 
         // ── Step 1 — request an OTP ───────────────────────────────────────────
@@ -209,16 +177,19 @@
                 if (!data.session) throw new Error("verifyOtp returned no session")
                 clearPending()
 
-                // Persist the session OURSELVES (supabase-js's own persistence is
-                // broken in LINE's webview). Write it to our cookie and confirm it
-                // reads back before navigating — if not, show a clear error instead
-                // of a silent loop.
-                P4P.saveSession(data.session)
-                if (!P4P.readSession()) {
-                    busy(codeSubmit, false, "ยืนยัน")
-                    showError("บันทึกเซสชันไม่สำเร็จ กรุณาลองใหม่อีกครั้ง [persist]")
-                    return
-                }
+                // Hand the tokens to the SERVER, which stores the refresh token in
+                // an HttpOnly cookie and validates every page request. The browser
+                // never persists a session itself (unreliable in LINE's webview).
+                const resp = await fetch("/auth/session", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        access_token: data.session.access_token,
+                        refresh_token: data.session.refresh_token,
+                    }),
+                })
+                if (!resp.ok) throw new Error("session POST failed: " + resp.status)
+
                 showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
                 location.replace(RETURN_TO)
             } catch (err) {
