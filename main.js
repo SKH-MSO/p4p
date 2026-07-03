@@ -60,16 +60,39 @@ function parseCookies(req) {
   }
   return out
 }
-function setRt(res, rt) {
-  res.append("Set-Cookie", RT_COOKIE + "=" + encodeURIComponent(rt) + "; " + COOKIE_BASE + "; Max-Age=34560000")
+// The session cookie holds BOTH tokens as JSON: {at: access, rt: refresh}. We
+// cache the access token so we only hit Supabase's refresh endpoint when it's
+// near expiry — refreshing on every page load rotated the refresh token each
+// time, which Supabase can flag as reuse/theft and revoke the whole session.
+function setSessionCookie(res, at, rt) {
+  const val = encodeURIComponent(JSON.stringify({ at: at, rt: rt }))
+  res.append("Set-Cookie", RT_COOKIE + "=" + val + "; " + COOKIE_BASE + "; Max-Age=34560000")
 }
-function clearRt(res) {
+function clearSessionCookie(res) {
   res.append("Set-Cookie", RT_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
 }
+function readSessionCookie(req) {
+  const raw = parseCookies(req)[RT_COOKIE]
+  if (!raw) return null
+  try {
+    const o = JSON.parse(raw)
+    if (o && o.rt) return { at: o.at || null, rt: o.rt }
+  } catch (e) { /* legacy cookie held a bare refresh token */ }
+  return { at: null, rt: raw }
+}
+// Read a JWT's `exp` (unix seconds) without verifying it. 0 if unreadable.
+function jwtExp(token) {
+  try {
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+    const exp = JSON.parse(Buffer.from(b64, "base64").toString("utf8")).exp
+    return typeof exp === "number" ? exp : 0
+  } catch (e) { return 0 }
+}
 
-// Serve a gated page: require a valid refresh cookie, exchange it for a fresh
-// access token, rotate the cookie, and inject the token via <meta> (no inline
-// script -> no CSP change). No/invalid cookie -> redirect to /verify/.
+// Serve a gated page: require a valid session cookie; reuse the cached access
+// token while it's fresh, otherwise refresh once (rotating the cookie); inject
+// the token via <meta> (no inline script -> no CSP change). No/invalid cookie
+// or a failed refresh -> redirect to /verify/.
 function servePage(name) {
   return async (req, res) => {
     // Canonicalize to a trailing slash first. LIFF opens "/status" (no slash),
@@ -80,21 +103,26 @@ function servePage(name) {
       return res.redirect(302, "/" + name + "/" + req.originalUrl.slice(req.path.length))
     }
     const ret = encodeURIComponent(req.originalUrl)
-    const rt = parseCookies(req)[RT_COOKIE]
-    if (!rt) return res.redirect(302, "/verify/?return=" + ret + "&reason=no_session")
-    let at
-    try {
-      const r = await axios.post(
-        SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token",
-        { refresh_token: rt },
-        { headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
-      )
-      at = r.data && r.data.access_token
-      if (!at) throw new Error("no access_token in refresh response")
-      setRt(res, r.data.refresh_token || rt) // rotate
-    } catch (e) {
-      clearRt(res)
-      return res.redirect(302, "/verify/?return=" + ret + "&reason=expired")
+    const sess = readSessionCookie(req)
+    if (!sess) return res.redirect(302, "/verify/?return=" + ret + "&reason=no_session")
+
+    let at = sess.at
+    // Refresh only when the cached access token is missing or within 60s of
+    // expiry — so a normal browsing session refreshes ~once an hour, not per page.
+    if (!at || jwtExp(at) < Date.now() / 1000 + 60) {
+      try {
+        const r = await axios.post(
+          SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token",
+          { refresh_token: sess.rt },
+          { headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
+        )
+        at = r.data && r.data.access_token
+        if (!at) throw new Error("no access_token in refresh response")
+        setSessionCookie(res, at, r.data.refresh_token || sess.rt)
+      } catch (e) {
+        clearSessionCookie(res)
+        return res.redirect(302, "/verify/?return=" + ret + "&reason=expired")
+      }
     }
     res.setHeader("Content-Type", "text/html; charset=utf-8")
     res.send(pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at))
@@ -138,10 +166,10 @@ app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
   } catch (e) {
     return res.status(401).json({ error: "invalid token" })
   }
-  setRt(res, refresh_token)
+  setSessionCookie(res, access_token, refresh_token)
   res.json({ ok: true })
 })
-app.post("/auth/logout", (req, res) => { clearRt(res); res.json({ ok: true }) })
+app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok: true }) })
 
 // Gated pages: server-validated + token injected (must be registered BEFORE the
 // static mounts so "/status/" hits the handler, while "/status/app.js" etc.
