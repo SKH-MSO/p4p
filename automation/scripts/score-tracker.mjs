@@ -46,6 +46,15 @@ const EXEMPT_DEPTS = new Set(["INTERN"]);
 // behind (submits weeks/months late) still gets caught up automatically.
 const CATCHUP_WINDOW_MONTHS = 12;
 
+// ── Test-mode overrides (manual workflow_dispatch only, see score-tracker.yml) ──
+// Restrict to specific department(s) and/or redirect the email to a test
+// address instead of the real dept head — lets you verify a real send
+// end-to-end without touching a real department head's inbox. When
+// TEST_EMAIL is set, the run never writes to email_sent_log, so it has no
+// effect on the next real scheduled run.
+const TEST_DEPT_FILTER    = (process.env.TEST_DEPT ?? "").split(",").map(s => s.trim()).filter(Boolean);
+const TEST_EMAIL_OVERRIDE = process.env.TEST_EMAIL?.trim() || null;
+
 // ── Thai locale data ───────────────────────────────────────────────────────
 const THAI_MONTHS = {
   "01":"มกราคม","02":"กุมภาพันธ์","03":"มีนาคม","04":"เมษายน",
@@ -253,8 +262,15 @@ async function main() {
     console.log();
   }
 
-  const depts = await getDistinctDepts(sb, monthsDesc);
+  let depts = await getDistinctDepts(sb, monthsDesc);
   if (!depts.length) { console.log("⚠️  No departments found — nothing to do."); return; }
+
+  if (TEST_DEPT_FILTER.length) {
+    depts = depts.filter(d => TEST_DEPT_FILTER.includes(d));
+    console.log(`🧪  TEST MODE — dept filter: ${TEST_DEPT_FILTER.join(", ")}`);
+    if (TEST_EMAIL_OVERRIDE) console.log(`🧪  TEST MODE — recipient override: ${maskEmail(TEST_EMAIL_OVERRIDE)} (email_sent_log will NOT be updated)`);
+    if (!depts.length) { console.log("⚠️  No matching department(s) found — nothing to do."); return; }
+  }
   console.log(`🏥  Departments: ${depts.join(", ")}\n`);
 
   const sentByDept = await getSentMonthsByDept(sb, monthsAsc);
@@ -304,7 +320,7 @@ async function main() {
   const noEmail = [];
 
   for (const [dept, monthsData] of deptToSend) {
-    const email = (DEPT_HEADS[dept] ?? DEPT_HEADS[dept.trim()]) ?? null;
+    const email = TEST_EMAIL_OVERRIDE ?? ((DEPT_HEADS[dept] ?? DEPT_HEADS[dept.trim()]) ?? null);
     if (!email) {
       console.log(`⚠️  "${dept}": ไม่มีอีเมลหัวหน้า — ข้ามการส่ง`);
       noEmail.push(dept);
@@ -336,17 +352,20 @@ async function main() {
       intro: introText,
     });
 
-    const subject   = `รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthLabel} (ครบถ้วน)`;
+    const subjectPrefix = TEST_EMAIL_OVERRIDE ? "[TEST] " : "";
+    const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthLabel} (ครบถ้วน)`;
     const plainBody = `รายงานคะแนน P4P — เดือน ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}\nกลุ่มงาน: ${deptNames}`;
 
     await gmail.sendMessage({ to: email, subject, body: plainBody, html });
     console.log(`    ✉️  ส่งแล้ว`);
 
     for (const { dept, monthsData } of deptList) {
-      for (const { key } of monthsData) {
-        await logEmailSent(sb, key, dept);
+      if (!TEST_EMAIL_OVERRIDE) {
+        for (const { key } of monthsData) {
+          await logEmailSent(sb, key, dept);
+        }
       }
-      summaryRows.push({ dept, emailed: true, note: `ส่งแล้ว (${monthsData.map(m => m.displayName).join(", ")})` });
+      summaryRows.push({ dept, emailed: true, note: `ส่งแล้ว (${monthsData.map(m => m.displayName).join(", ")})${TEST_EMAIL_OVERRIDE ? " [TEST]" : ""}` });
     }
   }
 

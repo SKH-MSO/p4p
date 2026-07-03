@@ -8,6 +8,15 @@ on:
 
   # Allow manual runs (useful for testing or catching up after an outage)
   workflow_dispatch:
+    inputs:
+      test_dept:
+        description: "Restrict to this department only (comma-separated); blank = normal run over all departments"
+        required: false
+        default: ""
+      test_email:
+        description: "Send to this address instead of the real dept head, and skip marking months as sent; blank = normal run"
+        required: false
+        default: ""
 
 # ── Job ─────────────────────────────────────────────────────────────────────────────
 jobs:
@@ -49,4 +58,7 @@ jobs:
           # table (see automation/sql/dept_heads.sql), not this secret.
           # Google Drive root folder ID for P4P files (used to resolve per-physician links)
           P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
+          # Manual-run test overrides — blank on the scheduled run (see workflow_dispatch inputs above)
+          TEST_DEPT:            ${{ inputs.test_dept }}
+          TEST_EMAIL:           ${{ inputs.test_email }}
         run: node scripts/score-tracker.mjs
