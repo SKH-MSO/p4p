@@ -30,7 +30,7 @@
         const emailStep   = document.getElementById("email-step")
         const codeStep    = document.getElementById("code-step")
         const emailInput  = document.getElementById("email")
-        const codeInput   = document.getElementById("code")
+        const otpBoxes    = Array.from(document.querySelectorAll(".otp-box"))
         const emailSubmit = document.getElementById("email-submit")
         const codeSubmit  = document.getElementById("code-submit")
         const backBtn     = document.getElementById("back-btn")
@@ -43,6 +43,36 @@
         const msg         = document.getElementById("msg")
 
         let currentEmail = ""
+
+        // ── Physician-name dropdown (request-access step) ───────────────────────
+        // Populated from every roster table combined (list_all_physicians RPC —
+        // see scripts/list-all-physicians.sql) instead of free-text, so a new
+        // physician picks their own name rather than typing it. Sorted with
+        // proper Thai dictionary order: a plain byte-order sort gets leading
+        // vowels (เ/แ/โ/ใ/ไ) wrong since they're written before the consonant
+        // they belong to but sort after it in a real Thai dictionary.
+        async function loadPhysicianNames() {
+            try {
+                const { data, error } = await db.rpc("list_all_physicians")
+                if (error) throw error
+                const names = (data || []).map((r) => r.full_name).filter(Boolean)
+                names.sort((a, b) => a.localeCompare(b, "th"))
+                reqName.firstElementChild.textContent = "-- เลือกชื่อของท่าน --"
+                for (const name of names) {
+                    const opt = document.createElement("option")
+                    opt.value = name
+                    opt.textContent = name
+                    reqName.appendChild(opt)
+                }
+                reqName.disabled = false
+            } catch (err) {
+                console.error("loadPhysicianNames failed:", err)
+                // Leave it disabled — the request-step submit handler requires a
+                // real selection, so this fails safe rather than silently letting
+                // the placeholder value through.
+            }
+        }
+        loadPhysicianNames()
 
         // ── Helpers ───────────────────────────────────────────────────────────
         const showError  = (text) => { msg.className = "msg error";  msg.textContent = text }
@@ -75,6 +105,57 @@
             return null
         }
 
+        // ── OTP six-box input ─────────────────────────────────────────────────
+        const getOtpValue = () => otpBoxes.map((b) => b.value).join("")
+        const clearOtpBoxes = () => { otpBoxes.forEach((b) => (b.value = "")) }
+
+        otpBoxes.forEach((box, i) => {
+            // Normal typing: keep only the last digit typed, advance to the next box.
+            // Bulk fill (autofill suggestion, or a paste that slipped past the
+            // dedicated paste handler below): distribute the digits across this
+            // box and the following ones. No native maxlength is set on these
+            // inputs specifically so a multi-character autofill/paste isn't
+            // silently truncated to 1 char before this handler ever sees it.
+            box.addEventListener("input", () => {
+                const digits = box.value.replace(/\D/g, "")
+                if (digits.length > 1) {
+                    for (let k = 0; k < digits.length && i + k < otpBoxes.length; k++) {
+                        otpBoxes[i + k].value = digits[k]
+                    }
+                    otpBoxes[Math.min(i + digits.length, otpBoxes.length - 1)].focus()
+                } else {
+                    box.value = digits
+                    if (digits && i < otpBoxes.length - 1) otpBoxes[i + 1].focus()
+                }
+            })
+
+            box.addEventListener("keydown", (e) => {
+                if (e.key === "Backspace" && !box.value && i > 0) {
+                    e.preventDefault()
+                    otpBoxes[i - 1].value = ""
+                    otpBoxes[i - 1].focus()
+                } else if (e.key === "ArrowLeft" && i > 0) {
+                    e.preventDefault()
+                    otpBoxes[i - 1].focus()
+                } else if (e.key === "ArrowRight" && i < otpBoxes.length - 1) {
+                    e.preventDefault()
+                    otpBoxes[i + 1].focus()
+                }
+            })
+
+            // Explicit paste handling: intercept BEFORE the browser inserts the
+            // clipboard text, so a full 6-digit paste anywhere always distributes
+            // correctly regardless of how the target browser would otherwise
+            // truncate/insert it.
+            box.addEventListener("paste", (e) => {
+                e.preventDefault()
+                const text = (e.clipboardData || window.clipboardData).getData("text")
+                const digits = text.replace(/\D/g, "").slice(0, otpBoxes.length - i)
+                for (let k = 0; k < digits.length; k++) otpBoxes[i + k].value = digits[k]
+                if (digits.length) otpBoxes[Math.min(i + digits.length, otpBoxes.length - 1)].focus()
+            })
+        })
+
         // Switch to the code-entry step for a given email (after sending, or on
         // restore after a reload).
         const goToCodeStep = (email) => {
@@ -82,7 +163,7 @@
             sentTo.textContent = email
             emailStep.classList.add("hidden")
             codeStep.classList.remove("hidden")
-            codeInput.focus()
+            otpBoxes[0].focus()
         }
 
         // Why did the server send us here? "expired" = the session lapsed;
@@ -107,7 +188,7 @@
             const email = emailInput.value.trim().toLowerCase()
             if (!email) return
             // Email-format check before hitting the server.
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
                 showError("กรุณากรอกอีเมลให้ถูกต้อง")
                 return
             }
@@ -150,18 +231,11 @@
             }
         })
 
-        // Keep the OTP field to digits only (max 6) — strips anything pasted or
-        // typed that isn't 0-9, so the field can only ever hold a valid code.
-        codeInput.addEventListener("input", () => {
-            const cleaned = codeInput.value.replace(/\D/g, "").slice(0, 6)
-            if (cleaned !== codeInput.value) codeInput.value = cleaned
-        })
-
         // ── Step 2 — verify the OTP ───────────────────────────────────────────
         codeStep.addEventListener("submit", async (e) => {
             e.preventDefault()
             clearMsg()
-            const token = codeInput.value.trim()
+            const token = getOtpValue()
             if (!/^[0-9]{6}$/.test(token)) {
                 showError("กรุณากรอกรหัส 6 หลัก")
                 return
@@ -205,7 +279,7 @@
             clearMsg()
             codeStep.classList.add("hidden")
             emailStep.classList.remove("hidden")
-            codeInput.value = ""
+            clearOtpBoxes()
             emailInput.focus()
         })
 
@@ -215,7 +289,7 @@
             clearMsg()
             const name = reqName.value.trim()
             if (name.length < 2) {
-                showError("กรุณากรอกชื่อ-นามสกุลของท่าน")
+                showError("กรุณาเลือกชื่อของท่านจากรายการ")
                 return
             }
             busy(requestSubmit, true, "กำลังส่ง...")
