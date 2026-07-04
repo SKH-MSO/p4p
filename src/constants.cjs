@@ -43,4 +43,11 @@ const MONTH_ITERATOR = [
   [[11, 0], [10, 0], [9, 0], [8, 0], [7, 0], [6, 0]],
 ]
 
-module.exports = { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR }
+// Sheet keys (YYYY_MM, BE year) to render as disabled in the month-picker rich
+// menu: no label text, no tap action. Used for months whose roster data is
+// known to be broken/incomplete, so the bot doesn't send people to a status
+// page that can't show anything useful. Remove the key once the data is fixed
+// (or it'll age out on its own once the rolling 6-month window passes it).
+const DISABLED_SHEETS = new Set(["2569_02"])
+
+module.exports = { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR, DISABLED_SHEETS }

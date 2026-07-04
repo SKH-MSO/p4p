@@ -4,7 +4,9 @@ import axios from 'axios'
 import { svgToPng } from './render.mjs'
 
 // Months/colors/iterator are shared with main.js — single source of truth.
-const { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR } = createRequire(import.meta.url)('../src/constants.cjs')
+const { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR, DISABLED_SHEETS } = createRequire(import.meta.url)('../src/constants.cjs')
+
+const DISABLED_FILL = '#B5B5B5'
 
 const TOKEN = process.env.LINE_TOKEN
 
@@ -43,13 +45,17 @@ export function getMonthData(monthIndex) {
   const { year: ceYear, month: bangkokMonth } = bangkokYearMonth()
   if (monthIndex === undefined) monthIndex = bangkokMonth
   const beYear = ceYear + 543
-  return MONTH_ITERATOR[monthIndex].map(([mIdx, yOff]) => ({
-    name:     MONTH_NAMES[mIdx],
-    year:     beYear + yOff,
-    colorHex: COLOR_ARRAY[mIdx][1],
-    colorTw:  COLOR_ARRAY[mIdx][0],
-    sheet:    `${beYear + yOff}_${String(mIdx + 1).padStart(2, '0')}`,
-  }))
+  return MONTH_ITERATOR[monthIndex].map(([mIdx, yOff]) => {
+    const sheet = `${beYear + yOff}_${String(mIdx + 1).padStart(2, '0')}`
+    return {
+      name:     MONTH_NAMES[mIdx],
+      year:     beYear + yOff,
+      colorHex: COLOR_ARRAY[mIdx][1],
+      colorTw:  COLOR_ARRAY[mIdx][0],
+      sheet,
+      disabled: DISABLED_SHEETS.has(sheet),
+    }
+  })
 }
 
 // ── Generate month-picker SVG (2500 × 1686) ──────────────────────────────────
@@ -58,6 +64,10 @@ export function generateSVG(months) {
     const { x, w } = COLS[i % 3]
     const { y }    = ROWS[Math.floor(i / 3)]
     const cx = x + w / 2
+    if (m.disabled) {
+      return `
+  <rect x="${x}" y="${y}" width="${w}" height="${ROW_H}" fill="${DISABLED_FILL}"/>`
+    }
     return `
   <rect x="${x}" y="${y}" width="${w}" height="${ROW_H}" fill="${m.colorHex}"/>
   <text x="${cx}" y="${y + 305}" text-anchor="middle"
@@ -88,18 +98,23 @@ export function generateSVG(months) {
 
 // ── Build rich menu JSON payload (2500 × 1686) ───────────────────────────────
 export function buildMenuPayload(months) {
-  const monthAreas = months.map((m, i) => ({
-    bounds: {
-      x:      COLS[i % 3].x,
-      y:      ROWS[Math.floor(i / 3)].y,
-      width:  COLS[i % 3].w,
-      height: ROW_H,
-    },
-    action: {
-      type: 'uri',
-      uri:  `https://liff.line.me/2008561527-a0xP1XmY?sheetname=${m.sheet}&color=${m.colorTw}`,
-    },
-  }))
+  // Disabled months get no tappable area at all — tapping that part of the
+  // image does nothing, instead of opening a status page with broken data.
+  const monthAreas = months
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => !m.disabled)
+    .map(({ m, i }) => ({
+      bounds: {
+        x:      COLS[i % 3].x,
+        y:      ROWS[Math.floor(i / 3)].y,
+        width:  COLS[i % 3].w,
+        height: ROW_H,
+      },
+      action: {
+        type: 'uri',
+        uri:  `https://liff.line.me/2008561527-a0xP1XmY?sheetname=${m.sheet}&color=${m.colorTw}`,
+      },
+    }))
   return {
     size:        { width: 2500, height: 1686 },
     selected:    true,
