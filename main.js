@@ -182,23 +182,38 @@ app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok:
 // Uses the Supabase SERVICE ROLE key to call the approve/reject RPC — that key
 // never leaves this server.
 app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) => {
+  console.log("[tg-webhook] received. secret header present:", !!req.headers["x-telegram-bot-api-secret-token"])
+
   // Telegram echoes back the secret set via setWebhook in this header — the
   // only real proof a request came from Telegram and not a guessed URL.
   if (req.headers["x-telegram-bot-api-secret-token"] !== TELEGRAM_WEBHOOK_SECRET) {
+    console.log("[tg-webhook] REJECTED: secret header mismatch")
     return res.sendStatus(401)
   }
 
   const cb = req.body && req.body.callback_query
-  if (!cb || !cb.data) return res.sendStatus(200)
+  if (!cb || !cb.data) {
+    console.log("[tg-webhook] no callback_query.data in body — update type:", Object.keys(req.body || {}).join(","))
+    return res.sendStatus(200)
+  }
   const [action, token] = String(cb.data).split("|")
-  if (!token || (action !== "appr" && action !== "rej")) return res.sendStatus(200)
+  console.log("[tg-webhook] callback_data:", cb.data, "-> action:", action, "token:", token)
+  if (!token || (action !== "appr" && action !== "rej")) {
+    console.log("[tg-webhook] REJECTED: unparseable callback_data")
+    return res.sendStatus(200)
+  }
 
   const tg = (method, body) =>
     axios.post("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + method, body, { timeout: 8000 })
-      .catch((e) => console.error("telegram api error:", e.message))
+      .then((r) => { console.log("[tg-webhook] telegram." + method + " ok:", JSON.stringify(r.data)); return r })
+      .catch((e) => {
+        console.error("[tg-webhook] telegram." + method + " FAILED:",
+          e.response ? JSON.stringify(e.response.data) : e.message)
+      })
 
   try {
     const fn = action === "appr" ? "approve_access_request" : "reject_access_request"
+    console.log("[tg-webhook] calling Supabase RPC:", fn, "with token:", token)
     const r = await axios.post(
       SUPABASE_URL + "/rest/v1/rpc/" + fn,
       { p_token: token },
@@ -211,6 +226,7 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
         timeout: 8000,
       }
     )
+    console.log("[tg-webhook] RPC response:", JSON.stringify(r.data))
     const ok = r.data === true
 
     await tg("answerCallbackQuery", {
@@ -230,10 +246,12 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
       })
     }
   } catch (e) {
-    console.error("telegram webhook error:", e.message)
+    console.error("[tg-webhook] RPC call FAILED:",
+      e.response ? e.response.status + " " + JSON.stringify(e.response.data) : e.message)
     await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "เกิดข้อผิดพลาด กรุณาลองใหม่" })
   }
 
+  console.log("[tg-webhook] handler complete, responding 200")
   // Respond only after ALL Telegram/Supabase calls finish. Vercel's serverless
   // runtime can freeze the function the instant a response is sent — an early
   // ack (the previous version of this code) let the platform kill
