@@ -182,12 +182,22 @@ app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok:
 // Uses the Supabase SERVICE ROLE key to call the approve/reject RPC — that key
 // never leaves this server.
 app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) => {
+  const receivedSecret = (req.headers["x-telegram-bot-api-secret-token"] || "").trim()
+  const expectedSecret = (TELEGRAM_WEBHOOK_SECRET || "").trim()
   console.log("[tg-webhook] received. secret header present:", !!req.headers["x-telegram-bot-api-secret-token"])
 
   // Telegram echoes back the secret set via setWebhook in this header — the
-  // only real proof a request came from Telegram and not a guessed URL.
-  if (req.headers["x-telegram-bot-api-secret-token"] !== TELEGRAM_WEBHOOK_SECRET) {
-    console.log("[tg-webhook] REJECTED: secret header mismatch")
+  // only real proof a request came from Telegram and not a guessed URL. Trim
+  // both sides so an accidental trailing space/newline (easy to introduce
+  // pasting a long value into Vercel's env var UI) doesn't cause a false
+  // mismatch. Log LENGTHS only (never the values) — a length mismatch is a
+  // strong sign of a copy-paste truncation between where the secret was set
+  // (Vercel) and where it was registered (the setWebhook call).
+  if (receivedSecret !== expectedSecret) {
+    console.log(
+      "[tg-webhook] REJECTED: secret mismatch. received len=" + receivedSecret.length +
+      " expected len=" + expectedSecret.length + " (configured=" + !!TELEGRAM_WEBHOOK_SECRET + ")"
+    )
     return res.sendStatus(401)
   }
 
