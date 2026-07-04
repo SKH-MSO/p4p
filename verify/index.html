@@ -54,26 +54,26 @@
         }
         .card-head h1 {
             font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
-            font-size: 1.25rem;
+            font-size: 1.75rem;
             font-weight: 700;
             margin-bottom: 4px;
         }
-        .card-head p { font-size: .85rem; opacity: .9; }
+        .card-head p { font-size: 1.19rem; opacity: .9; }
 
         .card-body { padding: 24px; }
 
         label {
             display: block;
-            font-size: .8rem;
+            font-size: 1.12rem;
             font-weight: 600;
             color: var(--secondary);
             margin-bottom: 6px;
         }
 
-        input {
+        input, select {
             width: 100%;
             padding: 12px 14px;
-            font-size: 1rem;
+            font-size: 1.4rem;
             font-family: inherit;
             color: var(--text);
             background: #fff;
@@ -82,18 +82,31 @@
             outline: none;
             transition: border-color .15s;
         }
-        input:focus { border-color: var(--primary); }
+        input:focus, select:focus { border-color: var(--primary); }
         input[inputmode="numeric"] {
             letter-spacing: .4em;
             text-align: center;
             font-weight: 600;
+        }
+        select:disabled { opacity: .6; }
+
+        .otp-boxes { display: flex; gap: 8px; }
+        input.otp-box {
+            flex: 1 1 0;
+            min-width: 0;
+            aspect-ratio: 1 / 1;
+            padding: 0;
+            font-size: 2.38rem;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: normal;
         }
 
         button {
             width: 100%;
             margin-top: 16px;
             padding: 12px 14px;
-            font-size: .95rem;
+            font-size: 1.33rem;
             font-weight: 600;
             font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
             color: #fff;
@@ -105,12 +118,12 @@
         }
         button:disabled { opacity: .5; cursor: default; }
 
-        .hint { margin-top: 14px; font-size: .8rem; color: var(--text-muted); line-height: 1.5; }
+        .hint { margin-top: 14px; font-size: 1.12rem; color: var(--text-muted); line-height: 1.5; }
         .hint b { color: var(--secondary); font-weight: 600; word-break: break-all; }
 
         .msg {
             margin-top: 14px;
-            font-size: .82rem;
+            font-size: 1.15rem;
             padding: 10px 12px;
             border-radius: var(--radius);
             display: none;
@@ -127,7 +140,7 @@
             padding: 0;
             margin-top: 16px;
             text-decoration: underline;
-            font-size: .8rem;
+            font-size: 1.12rem;
         }
 
         .hidden { display: none !important; }
@@ -155,9 +168,9 @@
         }
         #desktop-block h2 {
             font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
-            font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
+            font-size: 1.89rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
         }
-        #desktop-block p { color: var(--muted); font-size: .95rem; }
+        #desktop-block p { color: var(--muted); font-size: 1.33rem; }
     </style>
 </head>
 
@@ -175,7 +188,7 @@
         <div class="card-body">
 
             <!-- Step 1: email -->
-            <form id="email-step">
+            <form id="email-step" novalidate>
                 <label for="email">อีเมลที่ใช้ส่ง P4P</label>
                 <input id="email" type="email" inputmode="email" autocomplete="email"
                     placeholder="name@example.com" required>
@@ -184,22 +197,29 @@
             </form>
 
             <!-- Step 2: OTP code -->
-            <form id="code-step" class="hidden">
-                <label for="code">รหัสยืนยัน 6 หลัก</label>
-                <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"
-                    maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+            <form id="code-step" class="hidden" novalidate>
+                <label id="otp-label">รหัสยืนยัน 6 หลัก</label>
+                <div class="otp-boxes" role="group" aria-labelledby="otp-label">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" class="otp-box" data-i="0" aria-label="หลักที่ 1">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="otp-box" data-i="1" aria-label="หลักที่ 2">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="otp-box" data-i="2" aria-label="หลักที่ 3">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="otp-box" data-i="3" aria-label="หลักที่ 4">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="otp-box" data-i="4" aria-label="หลักที่ 5">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" class="otp-box" data-i="5" aria-label="หลักที่ 6">
+                </div>
                 <button id="code-submit" type="submit">ยืนยัน</button>
                 <p class="hint">ส่งรหัสไปที่ <b id="sent-to"></b> แล้ว</p>
                 <button id="back-btn" type="button" class="link-btn">ใช้อีเมลอื่น</button>
             </form>
 
             <!-- Step 2b: request access (email not yet registered) -->
-            <form id="request-step" class="hidden">
+            <form id="request-step" class="hidden" novalidate>
                 <label for="reqname">ชื่อ-นามสกุล</label>
-                <input id="reqname" type="text" autocomplete="name"
-                    placeholder="เช่น นพ.สมชาย ใจดี" required>
+                <select id="reqname" required disabled>
+                    <option value="" disabled selected>-- กำลังโหลดรายชื่อ... --</option>
+                </select>
                 <button id="request-submit" type="submit">ส่งคำขอเข้าใช้งาน</button>
-                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณากรอกชื่อเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
+                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณาเลือกชื่อของท่านเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
                 <button id="request-back" type="button" class="link-btn">ใช้อีเมลอื่น</button>
             </form>
 
