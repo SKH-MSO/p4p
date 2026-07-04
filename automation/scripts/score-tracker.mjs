@@ -5,19 +5,17 @@
  * Triggered on the 1st of every month by GitHub Actions.
  *
  * Logic:
- *  Phase 1 — Per-department catch-up scan: walk a rolling window of months
- *             oldest → newest, and select the department's not-yet-sent
- *             months that are complete, stopping at the first month that's
- *             still incomplete (see selectMonthsToSend). This means a
- *             department only gets emailed once a given month is actually
- *             complete — never for a month that's still missing scores —
- *             and a department that falls behind still gets caught up
- *             automatically once it finishes, instead of needing a manual
- *             one-off resend (see scripts/resend-month.mjs).
+ *  Phase 1 — Per-department latest-complete scan: walk a rolling window of
+ *             months newest → oldest, and select only the latest consecutive
+ *             complete unsent months (see selectMonthsToSend). A department
+ *             gets emailed only when its newest months complete, reporting
+ *             those specific months, never older gaps. This ensures email
+ *             focuses on the latest progress, not catch-up backlog.
  *  Phase 2 — Group by head email: departments sharing the same head email are
  *             batched into ONE email (one email per person, not per department).
  *  Phase 3 — Send: one email per unique address, reporting only the month(s)
- *             newly selected in Phase 1.
+ *             newly selected in Phase 1. Never resend months already logged
+ *             in email_sent_log (tracked per department per month).
  *
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -130,26 +128,29 @@ function maskEmail(email) {
 // ── Selection logic (pure — covered by test/scoreTrackerCatchup.test.js) ───
 
 /**
- * Given one department's window months ordered oldest → newest, pick the
- * ones that are ready to email this run: not already sent, and complete.
- * Stops at the first month that exists but is still incomplete — a later
- * month is never reported while an earlier one is still an outstanding gap,
- * so dept heads always see completions in chronological order. A month with
- * no data at all (status === null — the department wasn't tracked that
- * month) is skipped without blocking later months.
+ * Given one department's window months ordered oldest → newest, pick the ones
+ * that are ready to email this run: only the latest consecutive complete
+ * unsent group. Walks backwards (newest first) until hitting an incomplete
+ * or already-sent month — ensures email shows only the newest completed
+ * month(s), not all older gaps. A month with no data (status === null — the
+ * department wasn't tracked that month) is skipped without blocking.
  *
  * @param {Array<{ key: string, status: { complete: boolean }|null }>} monthsAsc
  * @param {Set<string>} alreadySentKeys  month keys already logged as sent for this dept
- * @returns {Array<{ key: string, status: object }>}  months to send, oldest → newest
+ * @returns {Array<{ key: string, status: object }>}  latest complete unsent months, newest → oldest
  */
 export function selectMonthsToSend(monthsAsc, alreadySentKeys) {
+  const monthsDesc = [...monthsAsc].reverse(); // newest first
   const toSend = [];
-  for (const { key, status } of monthsAsc) {
-    if (alreadySentKeys.has(key)) continue;
-    if (status === null) continue;
-    if (!status.complete) break;
+
+  for (const { key, status } of monthsDesc) {
+    if (alreadySentKeys.has(key)) break;  // already sent → stop, don't reach older months
+    if (status === null) continue;         // no data → skip, don't block
+    if (!status.complete) break;           // incomplete → stop
     toSend.push({ key, status });
   }
+
+  // toSend is in newest→oldest order from walking backwards; return as-is for newest-first display
   return toSend;
 }
 

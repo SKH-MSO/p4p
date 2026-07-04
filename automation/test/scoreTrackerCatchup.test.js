@@ -14,59 +14,92 @@ test("all window months already sent → nothing to send", () => {
   assert.deepEqual(selectMonthsToSend(months, alreadySent), []);
 });
 
-test("oldest unsent month still incomplete → blocked, nothing to send", () => {
-  // Mirrors the March/April scenario: March already sent, April is the
-  // oldest unsent month but is still missing scores — must not send.
+test("newest month incomplete → nothing to send", () => {
   const months = [
     { key: "2569_03", status: complete() },
-    { key: "2569_04", status: incomplete(1, 5) },
+    { key: "2569_04", status: incomplete() },
   ];
-  const alreadySent = new Set(["2569_03"]);
+  const alreadySent = new Set();
+  // Walk newest→oldest: 04 incomplete → stop
   assert.deepEqual(selectMonthsToSend(months, alreadySent), []);
 });
 
-test("oldest unsent month just became complete → send exactly that one", () => {
-  // April has now been fully submitted — should be selected, May not yet.
+test("only newest complete unsent month", () => {
   const months = [
-    { key: "2569_03", status: complete() },
+    { key: "2569_03", status: incomplete() },
     { key: "2569_04", status: complete() },
-    { key: "2569_05", status: incomplete(3, 5) },
-  ];
-  const alreadySent = new Set(["2569_03"]);
-  assert.deepEqual(selectMonthsToSend(months, alreadySent), [
-    { key: "2569_04", status: complete() },
-  ]);
-});
-
-test("two consecutive complete unsent months are bundled together", () => {
-  const months = [
-    { key: "2569_04", status: complete() },
-    { key: "2569_05", status: complete() },
-    { key: "2569_06", status: incomplete() },
   ];
   const alreadySent = new Set();
+  // Walk newest→oldest: 04 complete, unsent → add; 03 incomplete → stop
+  // Result: [04] (newest-to-oldest order)
   assert.deepEqual(selectMonthsToSend(months, alreadySent), [
     { key: "2569_04", status: complete() },
+  ]);
+});
+
+test("two consecutive newest complete unsent months bundled together", () => {
+  const months = [
+    { key: "2569_03", status: incomplete() },
+    { key: "2569_04", status: complete() },
+    { key: "2569_05", status: complete() },
+  ];
+  const alreadySent = new Set();
+  // Walk newest→oldest: 05 complete → add; 04 complete → add; 03 incomplete → stop
+  // Result: [05, 04] (newest-to-oldest)
+  assert.deepEqual(selectMonthsToSend(months, alreadySent), [
+    { key: "2569_05", status: complete() },
+    { key: "2569_04", status: complete() },
+  ]);
+});
+
+test("newest complete unsent, older incomplete, even older complete → only newest", () => {
+  const months = [
+    { key: "2569_03", status: complete() },
+    { key: "2569_04", status: incomplete() },
+    { key: "2569_05", status: complete() },
+  ];
+  const alreadySent = new Set();
+  // Walk newest→oldest: 05 complete → add; 04 incomplete → stop
+  // Result: [05] (can't reach 03 because 04 blocks)
+  assert.deepEqual(selectMonthsToSend(months, alreadySent), [
     { key: "2569_05", status: complete() },
   ]);
 });
 
-test("a month with no data (status null) is skipped without blocking later months", () => {
+test("null status (no data) in the middle doesn't block later months", () => {
   const months = [
-    { key: "2569_02", status: null }, // department didn't exist yet
-    { key: "2569_03", status: complete() },
+    { key: "2569_02", status: complete() },
+    { key: "2569_03", status: null },           // department didn't exist yet
+    { key: "2569_04", status: complete() },
   ];
   const alreadySent = new Set();
+  // Walk newest→oldest: 04 complete → add; 03 null → skip; 02 complete → add
+  // Result: [04, 02] (newest-to-oldest, skipping null)
   assert.deepEqual(selectMonthsToSend(months, alreadySent), [
-    { key: "2569_03", status: complete() },
+    { key: "2569_04", status: complete() },
+    { key: "2569_02", status: complete() },
   ]);
 });
 
-test("fully caught up and no new complete month → nothing to send", () => {
+test("newest month already sent → nothing to send", () => {
   const months = [
+    { key: "2569_03", status: complete() },
     { key: "2569_04", status: complete() },
-    { key: "2569_05", status: incomplete() },
   ];
   const alreadySent = new Set(["2569_04"]);
+  // Walk newest→oldest: 04 already sent → stop
+  // Result: [] (don't reach 03)
+  assert.deepEqual(selectMonthsToSend(months, alreadySent), []);
+});
+
+test("multiple complete unsent after incomplete month only takes newest complete", () => {
+  const months = [
+    { key: "2569_02", status: complete() },
+    { key: "2569_03", status: complete() },
+    { key: "2569_04", status: incomplete() },
+  ];
+  const alreadySent = new Set();
+  // Walk newest→oldest: 04 incomplete → stop
+  // Result: [] (can't reach 03 or 02 because 04 blocks)
   assert.deepEqual(selectMonthsToSend(months, alreadySent), []);
 });
