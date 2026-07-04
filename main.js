@@ -8,6 +8,12 @@ const port = process.env.PORT || 3000
 const LINE_ACCESS_TOKEN = process.env.LINE_ACCESS_TOKEN
 const LINE_CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET
 
+// For the Telegram approve/reject buttons (scripts/telegram-approve-buttons.sql).
+// SUPABASE_SERVICE_ROLE_KEY bypasses RLS — required only here, kept server-side.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+
 const headers = {
   "Content-Type": "application/json",
   "Authorization": "Bearer " + LINE_ACCESS_TOKEN
@@ -170,6 +176,65 @@ app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
   res.json({ ok: true })
 })
 app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok: true }) })
+
+// Receives Telegram's "callback_query" webhook when an admin taps ✅/❌ on the
+// access-request alert (buttons added by scripts/telegram-approve-buttons.sql).
+// Uses the Supabase SERVICE ROLE key to call the approve/reject RPC — that key
+// never leaves this server.
+app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) => {
+  // Telegram echoes back the secret set via setWebhook in this header — the
+  // only real proof a request came from Telegram and not a guessed URL.
+  if (req.headers["x-telegram-bot-api-secret-token"] !== TELEGRAM_WEBHOOK_SECRET) {
+    return res.sendStatus(401)
+  }
+  res.sendStatus(200) // ack immediately; Telegram doesn't wait for the rest
+
+  const cb = req.body && req.body.callback_query
+  if (!cb || !cb.data) return
+  const [action, token] = String(cb.data).split("|")
+  if (!token || (action !== "appr" && action !== "rej")) return
+
+  const tg = (method, body) =>
+    axios.post("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + method, body, { timeout: 8000 })
+      .catch((e) => console.error("telegram api error:", e.message))
+
+  try {
+    const fn = action === "appr" ? "approve_access_request" : "reject_access_request"
+    const r = await axios.post(
+      SUPABASE_URL + "/rest/v1/rpc/" + fn,
+      { p_token: token },
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+          "Content-Type": "application/json",
+        },
+        timeout: 8000,
+      }
+    )
+    const ok = r.data === true
+
+    await tg("answerCallbackQuery", {
+      callback_query_id: cb.id,
+      text: ok
+        ? (action === "appr" ? "อนุมัติแล้ว" : "ปฏิเสธคำขอแล้ว")
+        : "คำขอนี้ถูกดำเนินการไปแล้ว หรือไม่พบข้อมูล",
+    })
+
+    if (ok && cb.message) {
+      const suffix = action === "appr" ? "\n\n✅ อนุมัติแล้ว" : "\n\n❌ ปฏิเสธแล้ว"
+      await tg("editMessageText", {
+        chat_id: cb.message.chat.id,
+        message_id: cb.message.message_id,
+        text: (cb.message.text || "") + suffix,
+        reply_markup: { inline_keyboard: [] },
+      })
+    }
+  } catch (e) {
+    console.error("telegram webhook error:", e.message)
+    await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "เกิดข้อผิดพลาด กรุณาลองใหม่" })
+  }
+})
 
 // Gated pages: server-validated + token injected (must be registered BEFORE the
 // static mounts so "/status/" hits the handler, while "/status/app.js" etc.
