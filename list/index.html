@@ -55,9 +55,9 @@
       flex-shrink: 0;
     }
     .brand-icon svg { width: 16px; height: 16px; fill: white; }
-    .brand-name { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 24px; line-height: 1.2; color: #ffffff; }
-    .brand-sub  { font-size: 18px; color: rgba(255,255,255,.55); line-height: 1.2; }
-    .header-clock { font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 18px; color: rgba(255,255,255,.45); }
+    .brand-name { font-family: 'Manrope', sans-serif; font-weight: 700; font-size: 17px; line-height: 1.2; color: #ffffff; }
+    .brand-sub  { font-size: 13px; color: rgba(255,255,255,.55); line-height: 1.2; }
+    .header-clock { font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 13px; color: rgba(255,255,255,.45); }
 
     .header-controls { padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary); }
 
@@ -66,7 +66,7 @@
       width: 100%; height: 40px;
       background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
       border-radius: var(--r-md); padding: 0 32px 0 12px;
-      font-size: 20px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 500;
+      font-size: 14px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 500;
       color: #ffffff; appearance: none;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
       background-repeat: no-repeat; background-position: right 10px center;
@@ -87,7 +87,7 @@
       width: 100%; height: 40px;
       background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
       border-radius: var(--r-md); padding: 0 12px 0 34px;
-      font-size: 20px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
+      font-size: 14px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif;
       color: #ffffff; outline: none;
       transition: border-color .15s, background .15s;
     }
@@ -115,9 +115,9 @@
     }
     .stat-pill-val {
       font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
-      font-size: 34px; font-weight: 700; color: var(--secondary); line-height: 1;
+      font-size: 24px; font-weight: 700; color: var(--secondary); line-height: 1;
     }
-    .stat-pill-lbl { font-size: 18px; color: var(--muted); font-weight: 500; margin-top: 3px; }
+    .stat-pill-lbl { font-size: 13px; color: var(--muted); font-weight: 500; margin-top: 3px; }
 
     /* ── TABLE CARD ── */
     .table-card {
@@ -127,17 +127,16 @@
     }
     .table-card-head {
       display: flex; align-items: center; justify-content: space-between;
-      flex-wrap: wrap; row-gap: 6px; column-gap: 10px;
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
     }
-    .table-card-title { font-family: 'Manrope', sans-serif; font-size: 21px; font-weight: 700; color: var(--secondary); }
+    .table-card-title { font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; color: var(--secondary); }
     .table-card-badge {
-      font-size: 17px; font-weight: 600; color: var(--secondary);
+      font-size: 12px; font-weight: 600; color: var(--secondary);
       border-radius: var(--r-sm); padding: 2px 8px;
     }
-    .table-card-count { font-size: 18px; color: var(--muted); }
-    .table-card-count strong { color: var(--secondary); font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif; font-size: 20px; }
+    .table-card-count { font-size: 13px; color: var(--muted); }
+    .table-card-count strong { color: var(--secondary); font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif; font-size: 14px; }
 
     /* Row list */
     .row-list { }
@@ -149,27 +148,27 @@
     .row-item:last-child { border-bottom: none; }
     .row-item:active { background: var(--tertiary); }
     .row-num {
-      font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 15px;
+      font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-size: 11px;
       color: #C9BEAF; min-width: 22px; flex-shrink: 0;
     }
-    .row-name { font-size: 21px; font-weight: 500; color: var(--secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-name { font-size: 15px; font-weight: 500; color: var(--secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row-dept {
-      font-size: 17px; color: var(--muted);
+      font-size: 12px; color: var(--muted);
       background: var(--tertiary); border-radius: var(--r-sm);
       padding: 3px 8px; white-space: nowrap;
-      max-width: 154px; overflow: hidden; text-overflow: ellipsis;
+      max-width: 110px; overflow: hidden; text-overflow: ellipsis;
       flex-shrink: 0;
     }
 
     /* Desktop table (hidden on mobile) */
-    .dt-table { display: none; width: 100%; border-collapse: collapse; font-size: 20px; }
+    .dt-table { display: none; width: 100%; border-collapse: collapse; font-size: 14px; }
     @media (min-width: 482px) {
       .row-list  { display: none; }
       .dt-table  { display: table; }
     }
     .dt-table thead th {
       padding: 10px 14px; text-align: left;
-      font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700;
+      font-family: 'Manrope', sans-serif; font-size: 11px; font-weight: 700;
       letter-spacing: .05em; text-transform: uppercase;
       border-bottom: 1px solid rgba(0,0,0,.1);
       cursor: pointer; user-select: none;
@@ -178,7 +177,7 @@
     .dt-table tbody tr:last-child { border-bottom: none; }
     .dt-table tbody tr:hover { background: var(--tertiary); }
     .dt-table tbody td { padding: 11px 14px; vertical-align: middle; }
-    .sort-icon { font-size: 14px; opacity: .4; margin-left: 3px; }
+    .sort-icon { font-size: 10px; opacity: .4; margin-left: 3px; }
     th.sort-asc  .sort-icon::after { content: '▲'; opacity: 1; }
     th.sort-desc .sort-icon::after { content: '▼'; opacity: 1; }
     th.sort-asc  .sort-icon,
@@ -190,13 +189,13 @@
       padding: 10px 14px; border-top: 1px solid var(--border);
       flex-wrap: wrap; gap: 8px;
     }
-    .pag-info { font-size: 18px; color: var(--muted); }
+    .pag-info { font-size: 13px; color: var(--muted); }
     .pag-info strong { color: var(--secondary); font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif; }
     .pag-btns { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
     .pag-btn {
       min-width: 32px; height: 32px; padding: 0 6px;
       border: 1px solid var(--border); border-radius: var(--r-sm);
-      background: var(--surface); font-size: 17px;
+      background: var(--surface); font-size: 12px;
       font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; color: var(--muted);
       cursor: pointer; display: flex; align-items: center; justify-content: center;
       transition: all .12s;
@@ -207,7 +206,7 @@
     .pag-btn-all {
       height: 32px; padding: 0 10px; border: 1px solid var(--border);
       border-radius: var(--r-sm); background: var(--surface);
-      font-size: 18px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 600;
+      font-size: 13px; font-family: 'Work Sans', 'Noto Sans Thai Looped', sans-serif; font-weight: 600;
       color: var(--muted); cursor: pointer; display: flex; align-items: center;
       gap: 4px; transition: all .12s; white-space: nowrap;
     }
@@ -221,13 +220,13 @@
       justify-content: center; padding: 24px 16px; gap: 10px; text-align: center;
     }
     .state-box svg { width: 36px; height: 36px; fill: #C9BEAF; }
-    .state-title { font-family: 'Manrope', sans-serif; font-size: 21px; font-weight: 700; color: var(--muted); }
-    .state-sub { font-size: 18px; color: #B0A090; }
+    .state-title { font-family: 'Manrope', sans-serif; font-size: 15px; font-weight: 700; color: var(--muted); }
+    .state-sub { font-size: 13px; color: #B0A090; }
 
     /* ── FOOTER ── */
     .app-footer {
       text-align: center; padding: 8px 16px;
-      font-size: 18px; color: var(--muted);
+      font-size: 13px; color: var(--muted);
       border-top: 1px solid var(--border); margin-top: 4px;
     }
 
@@ -257,9 +256,9 @@
     }
     #desktop-block h2 {
       font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
-      font-size: 1.89rem; font-weight: 700; color: var(--secondary); margin: 0 0 8px;
+      font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin: 0 0 8px;
     }
-    #desktop-block p { color: var(--muted); font-size: 1.33rem; margin: 0; }
+    #desktop-block p { color: var(--muted); font-size: .95rem; margin: 0; }
   </style>
 </head>
 <body>
