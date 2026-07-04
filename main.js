@@ -187,12 +187,11 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
   if (req.headers["x-telegram-bot-api-secret-token"] !== TELEGRAM_WEBHOOK_SECRET) {
     return res.sendStatus(401)
   }
-  res.sendStatus(200) // ack immediately; Telegram doesn't wait for the rest
 
   const cb = req.body && req.body.callback_query
-  if (!cb || !cb.data) return
+  if (!cb || !cb.data) return res.sendStatus(200)
   const [action, token] = String(cb.data).split("|")
-  if (!token || (action !== "appr" && action !== "rej")) return
+  if (!token || (action !== "appr" && action !== "rej")) return res.sendStatus(200)
 
   const tg = (method, body) =>
     axios.post("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + method, body, { timeout: 8000 })
@@ -234,6 +233,13 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
     console.error("telegram webhook error:", e.message)
     await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "เกิดข้อผิดพลาด กรุณาลองใหม่" })
   }
+
+  // Respond only after ALL Telegram/Supabase calls finish. Vercel's serverless
+  // runtime can freeze the function the instant a response is sent — an early
+  // ack (the previous version of this code) let the platform kill
+  // answerCallbackQuery/editMessageText before they completed, which is why the
+  // button spinner would time out with no confirmation ever showing.
+  res.sendStatus(200)
 })
 
 // Gated pages: server-validated + token injected (must be registered BEFORE the
