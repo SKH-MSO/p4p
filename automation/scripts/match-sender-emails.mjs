@@ -18,13 +18,13 @@
 
 import { google }        from "googleapis";
 import { createClient }  from "@supabase/supabase-js";
-import ExcelJS           from "exceljs";
 import { config as dotenvConfig } from "dotenv";
 
 import { createGmailClient }                                       from "../gmail-client.js";
 import { resolvePhysicianName, resolvePhysicianNameFromSheet }     from "../claude-analyst.js";
 import { matchName, saveSenderMatch }                               from "../supabase-client.js";
 import { MONTH_TOKENS_BY_NUM }                                     from "../months.js";
+import { parseExcel }                                              from "../excel-parse.js";
 
 dotenvConfig({ override: true });
 
@@ -52,58 +52,8 @@ async function listAllIds(gmail, labelId) {
   return ids;
 }
 
-// ── Excel parsing (mirrors firstSheetToRows / backfill-drive-scores) ─────────
-async function parseExcel(buffer, targetMonth) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
-
-  const sheets = wb.worksheets;
-  if (!sheets.length) throw new Error("Workbook has no sheets");
-
-  function nonNullCount(ws) {
-    let n = 0;
-    ws.eachRow(row => row.eachCell({ includeEmpty: false }, cell => {
-      if (cell.value !== null && cell.value !== undefined) n++;
-    }));
-    return n;
-  }
-
-  let idx = 0;
-  if (nonNullCount(sheets[0]) < 3 && sheets.length > 1) idx = 1;
-
-  if (targetMonth && sheets.length > 1) {
-    const toks = MONTH_TOKENS_BY_NUM[targetMonth] ?? [];
-    const m = sheets.findIndex(ws => toks.some(t => ws.name.toLowerCase().includes(t)));
-    if (m !== -1 && nonNullCount(sheets[m]) >= 3) idx = m;
-  }
-
-  const ws   = sheets[idx];
-  const rows = [];
-
-  ws.eachRow(row => {
-    if (!row.hasValues) return;
-    const obj = {};
-    row.eachCell({ includeEmpty: false }, (cell, col) => {
-      const key = `col_${col}`;
-      const val = cell.value;
-      const isMaster = val !== null && typeof val === "object" && "formula" in val;
-      const isClone  = val !== null && typeof val === "object" && "sharedFormula" in val && !("formula" in val);
-      if (isMaster || isClone) {
-        const r = cell.result;
-        obj[key] = isClone ? (typeof r === "number" ? r : null) : (r instanceof Date ? r.toISOString() : r ?? null);
-        return;
-      }
-      if (val === null || val === undefined)                            obj[key] = null;
-      else if (val instanceof Date)                                     obj[key] = val.toISOString();
-      else if (typeof val === "object" && Array.isArray(val.richText)) obj[key] = val.richText.map(r => r.text ?? "").join("");
-      else if (typeof val === "object" && "text" in val)               obj[key] = String(val.text ?? "");
-      else                                                              obj[key] = val;
-    });
-    if (Object.keys(obj).length) rows.push(obj);
-  });
-
-  return { rows, sheetName: ws.name };
-}
+// parseExcel now lives in ../excel-parse.js (shared with
+// backfill-drive-scores.mjs — was independently duplicated in both scripts).
 
 // ── Discover all YYYY_MM roster tables via PostgREST OpenAPI spec ─────────────
 async function getRosterTables() {
@@ -144,7 +94,7 @@ async function tryMessage(gmailClient, rawGmail, msgId, tables) {
       });
       const base64 = res.data.data.replace(/-/g, "+").replace(/_/g, "/");
       const buffer = Buffer.from(base64, "base64");
-      const { rows, sheetName } = await parseExcel(buffer, null);
+      const { rows, sheetName } = await parseExcel(buffer, null, MONTH_TOKENS_BY_NUM);
       const candidates = resolvePhysicianNameFromSheet(rows, sheetName);
 
       for (const candidate of candidates) {

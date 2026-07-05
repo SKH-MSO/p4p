@@ -27,7 +27,6 @@
  * and edit a single row of beats re-pasting a whole JSON blob each time.
  */
 
-import { createClient }          from "@supabase/supabase-js";
 import { config as dotenvConfig } from "dotenv";
 import { appendFileSync }        from "fs";
 import { createGmailClient }     from "../gmail-client.js";
@@ -35,6 +34,7 @@ import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
 import { getDeptHeads }          from "../supabase-client.js";
 import { bangkokNow, todayThaiStr } from "../bangkok-date.js";
+import { createSB, maskEmail, getDeptStatus } from "../dept-status.js";
 
 dotenvConfig({ override: true });
 
@@ -115,17 +115,8 @@ function monthRangeShortLabel(monthKeys) {
 
 // todayThaiStr is now imported from ../bangkok-date.js (Bangkok-safe; see
 // the comment on getPreviousMonths above for why raw `new Date()` is unsafe
-// here).
-
-// This workflow runs on GitHub Actions in a PUBLIC repo — never print or
-// persist a full recipient address to console/$GITHUB_STEP_SUMMARY, both of
-// which are publicly readable job output.
-function maskEmail(email) {
-  const [user, domain] = String(email ?? "").split("@");
-  if (!domain) return "***";
-  const masked = user.length <= 2 ? `${user[0] ?? "*"}*` : `${user[0]}${"*".repeat(user.length - 2)}${user.slice(-1)}`;
-  return `${masked}@${domain}`;
-}
+// here). maskEmail/createSB/getDeptStatus are now imported from
+// ../dept-status.js (shared with resend-month.mjs).
 
 // ── Selection logic (pure — covered by test/scoreTrackerCatchup.test.js) ───
 
@@ -156,47 +147,7 @@ export function selectMonthsToSend(monthsAsc, alreadySentKeys) {
   return toSend;
 }
 
-// ── Supabase helpers ───────────────────────────────────────────────────────
-function createSB() {
-  const { SUPABASE_URL, SUPABASE_KEY } = process.env;
-  if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
-}
-
-async function getDeptStatus(sb, tableKey, dept, driveFileMap = null) {
-  const { data, error } = await sb
-    .from(tableKey)
-    .select("firstname, lastname, score")
-    .eq("department", dept);
-  if (error) {
-    // A window that reaches back further than a department/table's history
-    // is expected — treat "table doesn't exist" as "no data" rather than a
-    // fatal error (same pattern as process/report.js's getSupabasePersons).
-    if (error.code === "42P01" || /does not exist|schema cache/i.test(error.message)) return null;
-    throw new Error(`[${tableKey}/${dept}] Supabase: ${error.message}`);
-  }
-  if (!data?.length) return null;
-
-  const total   = data.length;
-  const filled  = data.filter(r => r.score !== null).length;
-  const missing = total - filled;
-
-  // Sort: score DESC, nulls last
-  const rows = [...data]
-    .sort((a, b) => {
-      if (a.score === null && b.score === null) return 0;
-      if (a.score === null) return 1;
-      if (b.score === null) return -1;
-      return b.score - a.score;
-    })
-    .map(r => {
-      const name = `${r.firstname ?? ""} ${r.lastname ?? ""}`.trim();
-      return { name, score: r.score, driveFileId: driveFileMap?.get(name) ?? null };
-    });
-
-  const missingNames = rows.filter(r => r.score === null).map(r => r.name);
-  return { total, filled, missing, complete: missing === 0, missingNames, rows };
-}
+// createSB/getDeptStatus are now imported from ../dept-status.js.
 
 async function getDistinctDepts(sb, tableKeys) {
   const deptSet = new Set();

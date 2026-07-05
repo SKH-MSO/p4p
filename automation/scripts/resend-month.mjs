@@ -21,7 +21,6 @@
  * sql/dept_heads.sql), same as score-tracker.mjs.
  */
 
-import { createClient }          from "@supabase/supabase-js";
 import { config as dotenvConfig } from "dotenv";
 import { appendFileSync }        from "fs";
 import { createGmailClient }     from "../gmail-client.js";
@@ -29,6 +28,7 @@ import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
 import { getDeptHeads }          from "../supabase-client.js";
 import { todayThaiStr }          from "../bangkok-date.js";
+import { createSB, maskEmail, getDeptStatus } from "../dept-status.js";
 
 dotenvConfig({ override: true });
 
@@ -46,52 +46,12 @@ function tableKeyToDisplay(key) {
   return `${THAI_MONTHS[month] ?? month} ${year}`;
 }
 
-// todayThaiStr is imported from ../bangkok-date.js (Bangkok-safe — a raw
-// `new Date()` reads the host's local time, UTC on GitHub Actions runners,
-// which can resolve to the wrong calendar day near the Bangkok boundary).
-
-// This can run on GitHub Actions in a PUBLIC repo — never print or persist a
-// full recipient address to console/$GITHUB_STEP_SUMMARY.
-function maskEmail(email) {
-  const [user, domain] = String(email ?? "").split("@");
-  if (!domain) return "***";
-  const masked = user.length <= 2 ? `${user[0] ?? "*"}*` : `${user[0]}${"*".repeat(user.length - 2)}${user.slice(-1)}`;
-  return `${masked}@${domain}`;
-}
-
-function createSB() {
-  const { SUPABASE_URL, SUPABASE_KEY } = process.env;
-  if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
-}
-
-async function getDeptStatus(sb, tableKey, dept, driveFileMap) {
-  const { data, error } = await sb
-    .from(tableKey)
-    .select("firstname, lastname, score")
-    .eq("department", dept);
-  if (error) throw new Error(`[${tableKey}/${dept}] Supabase: ${error.message}`);
-  if (!data?.length) return null;
-
-  const total   = data.length;
-  const filled  = data.filter(r => r.score !== null).length;
-  const missing = total - filled;
-
-  const rows = [...data]
-    .sort((a, b) => {
-      if (a.score === null && b.score === null) return 0;
-      if (a.score === null) return 1;
-      if (b.score === null) return -1;
-      return b.score - a.score;
-    })
-    .map(r => {
-      const name = `${r.firstname ?? ""} ${r.lastname ?? ""}`.trim();
-      return { name, score: r.score, driveFileId: driveFileMap?.get(name) ?? null };
-    });
-
-  const missingNames = rows.filter(r => r.score === null).map(r => r.name);
-  return { total, filled, missing, complete: missing === 0, missingNames, rows };
-}
+// todayThaiStr, createSB, maskEmail, getDeptStatus are shared with
+// score-tracker.mjs — see ../bangkok-date.js and ../dept-status.js. This
+// picks up the "table doesn't exist" tolerance getDeptStatus already had in
+// score-tracker.mjs's copy but this file's copy was missing, which used to
+// make this script crash (instead of reporting "no data") against a month
+// whose Supabase table doesn't exist.
 
 async function getDistinctDepts(sb, tableKey) {
   const { data, error } = await sb.from(tableKey).select("department");

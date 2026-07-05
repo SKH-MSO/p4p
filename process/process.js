@@ -19,6 +19,10 @@ const os                = require('os');
 const path              = require('path');
 const { spawnSync }     = require('child_process');
 const ExcelJS           = require('exceljs');
+const {
+  log, sleep, withRetry, stripExt, normaliseName,
+  createAuth, createDriveClient, driveListAll, listFolders, listExcelFiles,
+} = require('./lib');
 
 // ═══════════════════════════════════════════════════════════════════
 //  CONFIG
@@ -165,8 +169,9 @@ function getTargetMonths() {
 // ═══════════════════════════════════════════════════════════════════
 //  Utility
 // ═══════════════════════════════════════════════════════════════════
-function stripExt(filename)    { return filename.replace(/\.(xlsx|xls)$/i, '').trim(); }
-function normaliseName(name)   { return (name ?? '').trim().replace(/\s+/g, ' '); }
+// stripExt, normaliseName, log, sleep, withRetry, createAuth,
+// createDriveClient, driveListAll, listFolders, listExcelFiles now live in
+// ./lib.js (shared with report.js — see that file's header comment).
 function toSheetName(name)     { return name.replace(/[\\/:?*[\]]/g, '').substring(0, 31).trim(); }
 
 function hexToArgb(hex) {
@@ -195,39 +200,6 @@ function monthKeyToSheetBase(monthKey) {
   return `${THAI_MONTH_ABBR[month]} ${beYear.slice(2)}`;  // e.g. "ธ.ค. 68"
 }
 
-function log(msg, level = 'info') {
-  (level === 'warn' ? console.error : console.log)((level === 'warn' ? '⚠  ' : '') + msg);
-}
-
-/** ms delay */
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-/**
- * Retry an async fn on Google quota (429) or server (5xx) errors.
- * Exponential backoff starting at 3 s, capped at 60 s.
- */
-async function withRetry(fn, maxRetries = 7) {
-  let delay = 3000;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const status  = err?.response?.status ?? err?.status ?? 0;
-      const msg     = err?.message ?? '';
-      const isQuota = status === 429 || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED');
-      const isServer = status >= 500 && status < 600;
-      if ((isQuota || isServer) && attempt < maxRetries) {
-        const wait = delay + Math.random() * 1000;
-        log(`  [Retry] ${isQuota ? 'Quota' : 'Server'} — waiting ${(wait/1000).toFixed(1)}s (attempt ${attempt+1}/${maxRetries})`, 'warn');
-        await sleep(wait);
-        delay = Math.min(delay * 2, 60000);
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
 function sbVal(row, colName, defaultVal = null) {
   const v = row[colName];
   return (v !== null && v !== undefined && v !== '') ? v : defaultVal;
@@ -236,50 +208,10 @@ function sbVal(row, colName, defaultVal = null) {
 // ═══════════════════════════════════════════════════════════════════
 //  Google API clients
 // ═══════════════════════════════════════════════════════════════════
-function createAuth() {
-  const auth = new google.auth.OAuth2(CONFIG.google.clientId, CONFIG.google.clientSecret);
-  auth.setCredentials({ refresh_token: CONFIG.google.refreshToken });
-  return auth;
-}
-
-function createDriveClient() {
-  return google.drive({ version: 'v3', auth: createAuth() });
-}
-
+// createAuth/createDriveClient now live in ./lib.js — createSheetsClient
+// stays here since report.js has no use for a Sheets client.
 function createSheetsClient() {
   return google.sheets({ version: 'v4', auth: createAuth() });
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  Google Drive helpers
-// ═══════════════════════════════════════════════════════════════════
-async function driveListAll(drive, params) {
-  const items = [];
-  let pageToken;
-  do {
-    const res = await withRetry(() => drive.files.list({ ...params, pageToken }));
-    items.push(...(res.data.files ?? []));
-    pageToken = res.data.nextPageToken;
-  } while (pageToken);
-  return items;
-}
-
-async function listFolders(drive, parentId) {
-  return driveListAll(drive, {
-    q: `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-    fields: 'nextPageToken, files(id, name)', pageSize: 100,
-  });
-}
-
-async function listExcelFiles(drive, folderId) {
-  const mimes = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-  ].map(m => `mimeType='${m}'`).join(' or ');
-  return driveListAll(drive, {
-    q: `'${folderId}' in parents and (${mimes}) and trashed=false`,
-    fields: 'nextPageToken, files(id, name)', pageSize: 100,
-  });
 }
 
 async function downloadFile(drive, fileId) {
