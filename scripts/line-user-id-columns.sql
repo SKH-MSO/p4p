@@ -22,8 +22,17 @@
 --  it looking falsely "unmatched".
 -- ============================================================================
 
+--  NOTE: the SQL editor sends a pasted multi-statement script as one implicit
+--  transaction — if anything below the ALTER TABLEs fails, Postgres rolls
+--  EVERYTHING in this submission back, including columns that "succeeded"
+--  moments earlier (this is almost certainly why the columns didn't stick the
+--  first time). The explicit `commit;` below closes that transaction right
+--  after the columns are added, so they're durable even if a later statement
+--  errors.
+
 alter table public.physician_directory   add column if not exists line_user_id text;
 alter table public.sender_physician_match add column if not exists line_user_id text;
+commit;
 
 create or replace function public.bind_line_user_id(p_line_user_id text, p_line_display_name text default null)
 returns void
@@ -52,6 +61,7 @@ begin
     where lower(sender_email) = v_email;
 end;
 $$;
+commit;
 
 -- One-off backfill for rows that already existed (or were bound) before this
 -- column existed. Safe to re-run any time — e.g. after adding a new
