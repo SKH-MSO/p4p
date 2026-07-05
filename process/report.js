@@ -18,13 +18,26 @@
  *   6. Upload / overwrite in Drive
  */
 
-const { google }       = require('googleapis');
 const { createClient } = require('@supabase/supabase-js');
 const ExcelJS          = require('exceljs');
 const { Readable }     = require('stream');
 const fs               = require('fs');
 const os               = require('os');
 const path             = require('path');
+const {
+  log, withRetry, stripExt, normaliseName,
+  createDriveClient, driveListAll, listFolders, listExcelFiles,
+} = require('./lib');
+
+/** Escape a value before interpolating it into the PNG-render HTML template. */
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Config
@@ -74,80 +87,11 @@ function formatRunTime() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Utilities
+//  Utilities / Google API clients / Drive helpers
+//  — normaliseName, stripExt, log, sleep, withRetry, createAuth,
+//    createDriveClient, driveListAll, listFolders, listExcelFiles now live
+//    in ./lib.js (shared with process.js — see that file's header comment).
 // ═══════════════════════════════════════════════════════════════════
-function normaliseName(name) { return (name ?? '').trim().replace(/\s+/g, ' '); }
-function stripExt(filename)  { return filename.replace(/\.(xlsx|xls)$/i, '').trim(); }
-function log(msg, level = 'info') {
-  (level === 'warn' ? console.error : console.log)((level === 'warn' ? '⚠  ' : '') + msg);
-}
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function withRetry(fn, maxRetries = 7) {
-  let delay = 3000;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const status   = err?.response?.status ?? err?.status ?? 0;
-      const msg      = err?.message ?? '';
-      const isQuota  = status === 429 || msg.includes('Quota exceeded') || msg.includes('RESOURCE_EXHAUSTED');
-      const isServer = status >= 500 && status < 600;
-      if ((isQuota || isServer) && attempt < maxRetries) {
-        const wait = delay + Math.random() * 1000;
-        log(`  [Retry] ${isQuota ? 'Quota' : 'Server'} — waiting ${(wait / 1000).toFixed(1)}s (attempt ${attempt + 1}/${maxRetries})`, 'warn');
-        await sleep(wait);
-        delay = Math.min(delay * 2, 60000);
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  Google API clients
-// ═══════════════════════════════════════════════════════════════════
-function createAuth() {
-  const auth = new google.auth.OAuth2(CONFIG.google.clientId, CONFIG.google.clientSecret);
-  auth.setCredentials({ refresh_token: CONFIG.google.refreshToken });
-  return auth;
-}
-function createDriveClient() { return google.drive({ version: 'v3', auth: createAuth() }); }
-
-// ═══════════════════════════════════════════════════════════════════
-//  Drive helpers
-// ═══════════════════════════════════════════════════════════════════
-async function driveListAll(drive, params) {
-  const items = [];
-  let pageToken;
-  do {
-    const res = await withRetry(() => drive.files.list({ ...params, pageToken }));
-    items.push(...(res.data.files ?? []));
-    pageToken = res.data.nextPageToken;
-  } while (pageToken);
-  return items;
-}
-
-async function listFolders(drive, parentId) {
-  return driveListAll(drive, {
-    q: `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-    fields: 'nextPageToken, files(id, name)',
-    pageSize: 100,
-  });
-}
-
-async function listExcelFiles(drive, folderId) {
-  const mimes = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-  ].map(m => `mimeType='${m}'`).join(' or ');
-  return driveListAll(drive, {
-    q: `'${folderId}' in parents and (${mimes}) and trashed=false`,
-    fields: 'nextPageToken, files(id, name)',
-    pageSize: 100,
-  });
-}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Step 1 — 6-month window, excluding the current month (newest first)
@@ -356,9 +300,14 @@ async function uploadReport(drive, buffer) {
   const mime     = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const fileName = CONFIG.reportFileName;
   const folderId = CONFIG.reportFolderId;
+  // Escape single quotes before interpolating into the Drive query string
+  // (matches process.js's uploadFileToDrive) — the fixed config values here
+  // don't currently contain one, but the query syntax breaks silently if
+  // they ever do.
+  const safeName = fileName.replace(/'/g, "\\'");
 
   const existing = await driveListAll(drive, {
-    q: `'${folderId}' in parents and name='${fileName}' and trashed=false`,
+    q: `'${folderId}' in parents and name='${safeName}' and trashed=false`,
     fields: 'nextPageToken, files(id, name)',
     pageSize: 10,
   });
@@ -398,8 +347,8 @@ function buildHtml(group, runTime) {
     : group.rows.map((r, i) => `
         <tr class="${i % 2 === 1 ? 'alt' : ''}">
           <td class="num">${i + 1}</td>
-          <td class="name">${r.fullname}</td>
-          <td class="dept">${r.department}</td>
+          <td class="name">${escHtml(r.fullname)}</td>
+          <td class="dept">${escHtml(r.department)}</td>
         </tr>`).join('');
 
   const emptyMsg = '';
@@ -557,6 +506,8 @@ async function renderPng(html) {
 async function uploadPng(drive, buffer, fileName) {
   const mime     = 'image/png';
   const folderId = CONFIG.reportFolderId;
+  // See uploadReport() above for why this is escaped.
+  const safeName = fileName.replace(/'/g, "\\'");
 
   // Write to temp file — fs.createReadStream is more reliable than
   // Readable.from() for large binary uploads via googleapis
@@ -565,7 +516,7 @@ async function uploadPng(drive, buffer, fileName) {
 
   try {
     const existing = await driveListAll(drive, {
-      q: `'${folderId}' in parents and name='${fileName}' and trashed=false`,
+      q: `'${folderId}' in parents and name='${safeName}' and trashed=false`,
       fields: 'nextPageToken, files(id, name)',
       pageSize: 10,
     });

@@ -24,10 +24,22 @@
  *                                   to the standard 3-month wording — pass this
  *                                   for one-off reports covering a different scope.
  */
+// dept/department names and physician names are editable Supabase data, not
+// compile-time constants — escape before interpolating into HTML so a stray
+// "<"/"&" in one never breaks the layout or, in the worst case, injects markup.
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function buildScoreReportEmail({ depts, reportDate, intro }) {
   const introText = intro ?? "ระบบได้รวบรวมสถานะการส่งคะแนน P4P ของ 3 เดือนล่าสุดแล้ว กดชื่อแพทย์เพื่อเปิดไฟล์ Excel บน Google Drive";
 
-  const driveLink = (id) => `https://drive.google.com/file/d/${id}/view`;
+  const driveLink = (id) => `https://drive.google.com/file/d/${encodeURIComponent(id)}/view`;
 
   // ── Per-department sections ───────────────────────────────────────────────
   const deptSections = depts.map(({ dept, monthsSummary }) => {
@@ -50,9 +62,10 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
       const rowsHtml = status.rows.map(({ name, score, driveFileId }) => {
         const hasScore = score !== null;
         const scoreCell = hasScore ? String(Math.round(score)) : "—";
+        const safeName = escHtml(name);
         const nameHtml = driveFileId
-          ? `<a href="${driveLink(driveFileId)}" style="color:#1d4ed8;text-decoration:none">${name}</a>`
-          : name;
+          ? `<a href="${driveLink(driveFileId)}" style="color:#1d4ed8;text-decoration:none">${safeName}</a>`
+          : safeName;
         const rowStyle = hasScore ? "" : `style="background:#fef2f2"`;
         return `<tr ${rowStyle}>
             <td>${nameHtml}</td>
@@ -80,15 +93,15 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
 
     return `
     <div class="dept-section">
-      <div class="dept-heading">${dept}</div>
+      <div class="dept-heading">${escHtml(dept)}</div>
       ${monthBlocks}
     </div>`;
   }).join(`<hr class="dept-divider">`);
 
   // Header title
-  const deptNames = depts.map(d => d.dept).join(", ");
+  const deptNames = escHtml(depts.map(d => d.dept).join(", "));
   const headerTitle = depts.length === 1
-    ? `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${depts[0].dept}`
+    ? `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${escHtml(depts[0].dept)}`
     : `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${deptNames}`;
 
   return `<!DOCTYPE html>

@@ -5,12 +5,28 @@
  * Content is driven by errorType — no raw technical details are exposed to the user.
  *
  * @param {object} data
- * @param {string} data.safeFilename    Attachment filename(s), HTML-escaped (may be empty)
+ * @param {string} data.safeFilename    Attachment filename(s) (may be empty)
  * @param {"wrong_extension"|"file_link"|"wrong_date"|"physician_not_found"|"other"} data.errorType
  * @param {string} [data.detectedDate]  Date string extracted from file, shown when errorType="wrong_date"
  * @param {string} [data.detectedName]  Name extracted from file, shown when errorType="physician_not_found"
  */
+// Escape here (the single place these values reach HTML) rather than relying
+// on every caller to pre-escape — filename/detectedName/detectedDate all
+// ultimately come from attacker-influenced email content (attachment name,
+// sender-provided sheet data).
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function buildHtmlErrorReply({ safeFilename = "", errorType = "other", detectedDate = "", detectedName = "" }) {
+  safeFilename = escHtml(safeFilename);
+  detectedDate = escHtml(detectedDate);
+  detectedName = escHtml(detectedName);
   const CONTENT = {
     wrong_extension: {
       bannerTitle  : "ประเภทไฟล์ไม่ถูกต้อง",

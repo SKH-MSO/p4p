@@ -86,9 +86,14 @@ function readSessionCookie(req) {
   if (!raw) return null
   try {
     const o = JSON.parse(raw)
-    if (o && o.rt) return { at: o.at || null, rt: o.rt }
-  } catch (e) { /* legacy cookie held a bare refresh token */ }
-  return { at: null, rt: raw }
+    // Valid JSON but no usable refresh token inside — treat as no session
+    // rather than falling through to using the raw JSON string itself as a
+    // (bogus) refresh token.
+    return (o && o.rt) ? { at: o.at || null, rt: o.rt } : null
+  } catch (e) {
+    // Legacy cookie held a bare refresh token (pre-JSON format).
+    return { at: null, rt: raw }
+  }
 }
 // Read a JWT's payload without verifying it (the token itself was already
 // validated by Supabase at /auth/session or the refresh call below — this is
@@ -268,7 +273,11 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
     return res.sendStatus(200)
   }
   const [action, token] = String(cb.data).split("|")
-  console.log("[tg-webhook] callback_data:", cb.data, "-> action:", action, "token:", token)
+  // Log only a token prefix — it's a single-use approve/reject token for
+  // access_requests, not a long-lived secret, but there's no reason to put
+  // the full value in Vercel's logs when a prefix is enough to correlate.
+  const tokenPreview = token ? token.slice(0, 8) + "…" : token
+  console.log("[tg-webhook] callback_data action:", action, "token:", tokenPreview)
   if (!token || (action !== "appr" && action !== "rej")) {
     console.log("[tg-webhook] REJECTED: unparseable callback_data")
     return res.sendStatus(200)
@@ -284,7 +293,7 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
 
   try {
     const fn = action === "appr" ? "approve_access_request" : "reject_access_request"
-    console.log("[tg-webhook] calling Supabase RPC:", fn, "with token:", token)
+    console.log("[tg-webhook] calling Supabase RPC:", fn, "with token:", tokenPreview)
     const r = await axios.post(
       SUPABASE_URL + "/rest/v1/rpc/" + fn,
       { p_token: token },

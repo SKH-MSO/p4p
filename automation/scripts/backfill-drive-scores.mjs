@@ -19,12 +19,12 @@
 
 import { google }   from "googleapis";
 import { createClient } from "@supabase/supabase-js";
-import ExcelJS      from "exceljs";
 import { appendFileSync } from "fs";
 import { config as dotenvConfig } from "dotenv";
 import { resolveScore }          from "../claude-analyst.js";
 import { matchName, saveScore }  from "../supabase-client.js";
 import { MONTH_FOLDER_NAMES, MONTH_TOKENS_BY_NUM } from "../months.js";
+import { parseExcel }            from "../excel-parse.js";
 
 dotenvConfig({ override: true });
 
@@ -79,60 +79,9 @@ async function downloadBuffer(drive, fileId) {
   return Buffer.from(res.data);
 }
 
-// ── Excel parsing (mirrors index.js firstSheetToRows with all fixes) ──────
-async function parseExcel(buffer, targetMonth) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
-
-  const sheets = wb.worksheets;
-  if (!sheets.length) throw new Error("Workbook has no sheets");
-
-  function nonNullCount(ws) {
-    let n = 0;
-    ws.eachRow(row => row.eachCell({ includeEmpty: false }, cell => {
-      if (cell.value !== null && cell.value !== undefined) n++;
-    }));
-    return n;
-  }
-
-  // Default: first non-empty sheet
-  let idx = 0;
-  if (nonNullCount(sheets[0]) < 3 && sheets.length > 1) idx = 1;
-
-  // Month-name match for multi-sheet workbooks
-  if (targetMonth && sheets.length > 1) {
-    const toks = MONTH_TOKENS_BY_NUM[targetMonth] ?? [];
-    const m = sheets.findIndex(ws => toks.some(t => ws.name.toLowerCase().includes(t)));
-    if (m !== -1 && nonNullCount(sheets[m]) >= 3) idx = m;
-  }
-
-  const ws   = sheets[idx];
-  const rows = [];
-
-  ws.eachRow(row => {
-    if (!row.hasValues) return;
-    const obj = {};
-    row.eachCell({ includeEmpty: false }, (cell, col) => {
-      const key = `col_${col}`;
-      const val = cell.value;
-      const isMaster = val !== null && typeof val === "object" && "formula" in val;
-      const isClone  = val !== null && typeof val === "object" && "sharedFormula" in val && !("formula" in val);
-      if (isMaster || isClone) {
-        const r = cell.result;
-        obj[key] = isClone ? (typeof r === "number" ? r : null) : (r instanceof Date ? r.toISOString() : r ?? null);
-        return;
-      }
-      if (val === null || val === undefined)                         obj[key] = null;
-      else if (val instanceof Date)                                  obj[key] = val.toISOString();
-      else if (typeof val === "object" && Array.isArray(val.richText)) obj[key] = val.richText.map(r => r.text ?? "").join("");
-      else if (typeof val === "object" && "text" in val)             obj[key] = String(val.text ?? "");
-      else                                                           obj[key] = val;
-    });
-    if (Object.keys(obj).length) rows.push(obj);
-  });
-
-  return { rows, sheetName: ws.name, sheetCount: sheets.length };
-}
+// parseExcel now lives in ../excel-parse.js (shared with match-sender-emails.mjs
+// — was independently duplicated in both scripts, risking the two drifting
+// apart as fixes landed in only one copy).
 
 // ── Main ──────────────────────────────────────────────────────────────────
 async function main() {
@@ -164,23 +113,17 @@ async function main() {
     return;
   }
 
-  // ── Clear all scores for this month before re-processing ──────────────
-  if (DRY_RUN) {
-    console.log("🔍 Dry run — skipping score clear\n");
-  } else {
-    const { SUPABASE_URL, SUPABASE_KEY } = process.env;
-    if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_KEY");
-    const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
-    const { error: clearError } = await sb
-      .from(DATE_KEY)
-      .update({ score: null })
-      .not("index", "is", null);
-    if (clearError) throw new Error(`Failed to clear scores in "${DATE_KEY}": ${clearError.message}`);
-    console.log(`🧹 Cleared all score values in table "${DATE_KEY}"\n`);
-  }
-
   // ── Process each file ──────────────────────────────────────────────────
+  // NOTE: scores for rows NOT reprocessed this run are cleared AFTER the loop
+  // below, not before it. Clearing every score upfront (the previous
+  // behaviour) left a real data-loss window: if this run crashed, rate-
+  // limited, or hit a Drive outage partway through the file list, every
+  // physician whose file hadn't been reached yet was left with score=null
+  // and no automatic recovery. Deferring the clear to the end means a
+  // partial run only ever loses freshness for files it didn't get to —
+  // it never destroys data for files it simply hasn't processed yet.
   const results = [];
+  const matchedIndices = new Set();
 
   for (const file of files) {
     const entry = {
@@ -199,7 +142,7 @@ async function main() {
       const buffer = await downloadBuffer(drive, file.id);
 
       // 2. Parse Excel
-      const { rows, sheetName, sheetCount } = await parseExcel(buffer, TARGET_MONTH);
+      const { rows, sheetName, sheetCount } = await parseExcel(buffer, TARGET_MONTH, MONTH_TOKENS_BY_NUM);
       if (sheetCount > 1) console.log(`│  📋 ${sheetCount} sheets — using "${sheetName}"`);
       console.log(`│  📄 Rows: ${rows.length}`);
 
@@ -243,6 +186,7 @@ async function main() {
         console.log(`└─ 🔍 Dry run — score NOT saved\n`);
       } else {
         await saveScore(DATE_KEY, match.index, score);
+        matchedIndices.add(match.index);
         entry.status = "✅ saved";
         console.log(`└─ 💾 Saved ${score.toFixed(2)} → "${DATE_KEY}" row ${match.index}\n`);
       }
@@ -254,6 +198,25 @@ async function main() {
     }
 
     results.push(entry);
+  }
+
+  // ── Clear stale scores for rows NOT reprocessed this run ────────────────
+  // Deliberately done here (after every file has been attempted), not before
+  // the loop — see the comment above the loop for why.
+  if (DRY_RUN) {
+    console.log("🔍 Dry run — skipping stale-score clear\n");
+  } else if (matchedIndices.size === 0) {
+    console.log("⚠️  No files were successfully matched/saved this run — skipping stale-score clear so the whole table isn't wiped.\n");
+  } else {
+    const { SUPABASE_URL, SUPABASE_KEY } = process.env;
+    if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_KEY");
+    const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+    const { error: clearError } = await sb
+      .from(DATE_KEY)
+      .update({ score: null })
+      .not("index", "in", `(${[...matchedIndices].join(",")})`);
+    if (clearError) throw new Error(`Failed to clear stale scores in "${DATE_KEY}": ${clearError.message}`);
+    console.log(`🧹 Cleared scores for rows not reprocessed this run in table "${DATE_KEY}"\n`);
   }
 
   // ── Summary ────────────────────────────────────────────────────────────

@@ -27,13 +27,14 @@
  * and edit a single row of beats re-pasting a whole JSON blob each time.
  */
 
-import { createClient }          from "@supabase/supabase-js";
 import { config as dotenvConfig } from "dotenv";
 import { appendFileSync }        from "fs";
 import { createGmailClient }     from "../gmail-client.js";
 import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
 import { getDeptHeads }          from "../supabase-client.js";
+import { bangkokNow, todayThaiStr } from "../bangkok-date.js";
+import { createSB, maskEmail, getDeptStatus } from "../dept-status.js";
 
 dotenvConfig({ override: true });
 
@@ -76,9 +77,12 @@ const THAI_MONTHS_SHORT = {
 
 /** Most-recent-first list of the `count` calendar months before this one. */
 function getPreviousMonths(count) {
-  const now = new Date();
-  let y = now.getFullYear();
-  let m = now.getMonth() + 1;
+  // Bangkok-safe: this workflow is cron'd for the 1st of the month, and a
+  // raw `new Date()` reads the GitHub Actions runner's UTC clock — right at
+  // the Bangkok midnight boundary that resolves to the wrong month.
+  const { ceYear, month } = bangkokNow();
+  let y = ceYear;
+  let m = month;
   const result = [];
   for (let i = 0; i < count; i++) {
     if (--m === 0) { m = 12; y--; }
@@ -109,21 +113,10 @@ function monthRangeShortLabel(monthKeys) {
     : `${oldLabel} ${oldYY} - ${newLabel} ${newYY}`;
 }
 
-function todayThaiStr() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${d.getDate()} ${THAI_MONTHS[m]} ${d.getFullYear() + 543}`;
-}
-
-// This workflow runs on GitHub Actions in a PUBLIC repo — never print or
-// persist a full recipient address to console/$GITHUB_STEP_SUMMARY, both of
-// which are publicly readable job output.
-function maskEmail(email) {
-  const [user, domain] = String(email ?? "").split("@");
-  if (!domain) return "***";
-  const masked = user.length <= 2 ? `${user[0] ?? "*"}*` : `${user[0]}${"*".repeat(user.length - 2)}${user.slice(-1)}`;
-  return `${masked}@${domain}`;
-}
+// todayThaiStr is now imported from ../bangkok-date.js (Bangkok-safe; see
+// the comment on getPreviousMonths above for why raw `new Date()` is unsafe
+// here). maskEmail/createSB/getDeptStatus are now imported from
+// ../dept-status.js (shared with resend-month.mjs).
 
 // ── Selection logic (pure — covered by test/scoreTrackerCatchup.test.js) ───
 
@@ -154,47 +147,7 @@ export function selectMonthsToSend(monthsAsc, alreadySentKeys) {
   return toSend;
 }
 
-// ── Supabase helpers ───────────────────────────────────────────────────────
-function createSB() {
-  const { SUPABASE_URL, SUPABASE_KEY } = process.env;
-  if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error("Missing SUPABASE_URL or SUPABASE_KEY");
-  return createClient(SUPABASE_URL, SUPABASE_KEY);
-}
-
-async function getDeptStatus(sb, tableKey, dept, driveFileMap = null) {
-  const { data, error } = await sb
-    .from(tableKey)
-    .select("firstname, lastname, score")
-    .eq("department", dept);
-  if (error) {
-    // A window that reaches back further than a department/table's history
-    // is expected — treat "table doesn't exist" as "no data" rather than a
-    // fatal error (same pattern as process/report.js's getSupabasePersons).
-    if (error.code === "42P01" || /does not exist|schema cache/i.test(error.message)) return null;
-    throw new Error(`[${tableKey}/${dept}] Supabase: ${error.message}`);
-  }
-  if (!data?.length) return null;
-
-  const total   = data.length;
-  const filled  = data.filter(r => r.score !== null).length;
-  const missing = total - filled;
-
-  // Sort: score DESC, nulls last
-  const rows = [...data]
-    .sort((a, b) => {
-      if (a.score === null && b.score === null) return 0;
-      if (a.score === null) return 1;
-      if (b.score === null) return -1;
-      return b.score - a.score;
-    })
-    .map(r => {
-      const name = `${r.firstname ?? ""} ${r.lastname ?? ""}`.trim();
-      return { name, score: r.score, driveFileId: driveFileMap?.get(name) ?? null };
-    });
-
-  const missingNames = rows.filter(r => r.score === null).map(r => r.name);
-  return { total, filled, missing, complete: missing === 0, missingNames, rows };
-}
+// createSB/getDeptStatus are now imported from ../dept-status.js.
 
 async function getDistinctDepts(sb, tableKeys) {
   const deptSet = new Set();
@@ -227,14 +180,29 @@ async function getSentMonthsByDept(sb, monthKeys) {
   return map;
 }
 
+// Failures collected here are surfaced in the step summary AND fail the run
+// (see main()'s final check) — an email that sent successfully but whose
+// "sent" log write silently failed would otherwise go unnoticed until the
+// NEXT scheduled run resends the same report to the same department head.
+const logSentFailures = [];
+
 async function logEmailSent(sb, tableKey, department) {
-  const { error } = await sb
+  const upsertOnce = () => sb
     .from("email_sent_log")
     .upsert(
       { table_name: tableKey, department, sent_at: new Date().toISOString() },
       { onConflict: "table_name,department", ignoreDuplicates: true }
     );
-  if (error) console.warn(`⚠️  email_sent_log insert failed [${department}]: ${error.message}`);
+
+  let { error } = await upsertOnce();
+  if (error) {
+    console.warn(`⚠️  email_sent_log insert failed [${department}/${tableKey}], retrying once: ${error.message}`);
+    ({ error } = await upsertOnce());
+  }
+  if (error) {
+    console.error(`❌  email_sent_log insert failed twice [${department}/${tableKey}]: ${error.message} — the report WAS emailed, but this run will not remember that, risking a duplicate send next time.`);
+    logSentFailures.push({ tableKey, department, message: error.message });
+  }
 }
 
 
@@ -394,6 +362,17 @@ async function main() {
   }
 
   writeSummary(summaryRows, monthsAsc, todayStr);
+
+  if (logSentFailures.length > 0) {
+    // Fail the run loudly (non-zero exit → red in GitHub Actions) instead of
+    // letting a swallowed email_sent_log write pass as a green run — the
+    // report already went out, but without this the next scheduled run has
+    // no way to know that and will resend it.
+    throw new Error(
+      `${logSentFailures.length} email_sent_log write(s) failed after retry — ` +
+      logSentFailures.map(f => `${f.department}/${f.tableKey} (${f.message})`).join("; ")
+    );
+  }
 }
 
 // ── Step summary helper ────────────────────────────────────────────────────
@@ -409,6 +388,16 @@ function writeSummary(rows, monthsAsc, todayStr) {
     md += `|---|:---:|---|\n`;
     for (const r of rows) {
       md += `| ${r.dept} | ${r.emailed ? "✅" : "—"} | ${r.note} |\n`;
+    }
+  }
+
+  if (logSentFailures.length > 0) {
+    md += `\n## ⚠️ email_sent_log write failures\n\n`;
+    md += `These reports were emailed successfully, but recording that fact failed twice — `;
+    md += `they may be resent next run unless fixed manually:\n\n`;
+    md += `| Department | Month | Error |\n|---|---|---|\n`;
+    for (const f of logSentFailures) {
+      md += `| ${f.department} | ${f.tableKey} | ${f.message.replace(/\|/g, "╎")} |\n`;
     }
   }
 

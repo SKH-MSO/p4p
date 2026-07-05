@@ -28,19 +28,17 @@ const MONTH_NAMES = [
 
 // For a given current month (0-11), the six months to display (most recent
 // first), as [monthIndex, yearOffset] pairs.
-const MONTH_ITERATOR = [
-  [[0, 0], [11, -1], [10, -1], [9, -1], [8, -1], [7, -1]],
-  [[1, 0], [0, 0], [11, -1], [10, -1], [9, -1], [8, -1]],
-  [[2, 0], [1, 0], [0, 0], [11, -1], [10, -1], [9, -1]],
-  [[3, 0], [2, 0], [1, 0], [0, 0], [11, -1], [10, -1]],
-  [[4, 0], [3, 0], [2, 0], [1, 0], [0, 0], [11, -1]],
-  [[5, 0], [4, 0], [3, 0], [2, 0], [1, 0], [0, 0]],
-  [[6, 0], [5, 0], [4, 0], [3, 0], [2, 0], [1, 0]],
-  [[7, 0], [6, 0], [5, 0], [4, 0], [3, 0], [2, 0]],
-  [[8, 0], [7, 0], [6, 0], [5, 0], [4, 0], [3, 0]],
-  [[9, 0], [8, 0], [7, 0], [6, 0], [5, 0], [4, 0]],
-  [[10, 0], [9, 0], [8, 0], [7, 0], [6, 0], [5, 0]],
-  [[11, 0], [10, 0], [9, 0], [8, 0], [7, 0], [6, 0]],
-]
+//
+// Derived rather than hand-written: this used to be a manually-maintained
+// 12x6 matrix of tuples (72 numbers) — easy to typo on an edit and hard to
+// verify by eye. It's fully determined by one rule: the i-th most-recent
+// month before month `m` is (m - i) mod 12, crossing into the previous
+// calendar year (yearOffset -1) whenever m - i is negative.
+const MONTH_ITERATOR = Array.from({ length: 12 }, (_, m) =>
+  Array.from({ length: 6 }, (_, i) => [
+    ((m - i) % 12 + 12) % 12,
+    (m - i) < 0 ? -1 : 0,
+  ])
+)
 
 module.exports = { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR }

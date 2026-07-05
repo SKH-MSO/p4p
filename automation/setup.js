@@ -84,12 +84,16 @@ rl.question("Paste the authorisation code here: ", async (code) => {
     // Persist to .env -------------------------------------------------------
     let envContent = fs.existsSync(ENV_PATH) ? fs.readFileSync(ENV_PATH, "utf8") : "";
 
-    if (envContent.includes("GOOGLE_REFRESH_TOKEN=")) {
-      // Replace existing line
-      envContent = envContent.replace(
-        /^GOOGLE_REFRESH_TOKEN=.*$/m,
-        `GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`
-      );
+    // Use the SAME anchored pattern for both the "does a real line already
+    // exist" check and the replacement — the previous code used a plain
+    // .includes() to decide whether to replace, which also matched a
+    // commented-out line like "# GOOGLE_REFRESH_TOKEN=old". In that case the
+    // anchored replace regex found no match (correctly, since ^ requires the
+    // line to actually start with the key) and silently left envContent
+    // unchanged, so the new refresh token was never written anywhere.
+    const lineRe = /^GOOGLE_REFRESH_TOKEN=.*$/m;
+    if (lineRe.test(envContent)) {
+      envContent = envContent.replace(lineRe, `GOOGLE_REFRESH_TOKEN=${tokens.refresh_token}`);
     } else {
       envContent += `\nGOOGLE_REFRESH_TOKEN=${tokens.refresh_token}\n`;
     }

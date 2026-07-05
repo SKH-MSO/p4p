@@ -68,14 +68,14 @@ export function resolveBeYear(filename, subject, body, emailDate = null) {
 
   // Tier 3 — 2-digit short BE 43–99 (e.g. 69 → 2569)
   for (const t of all) {
-    const m = t.match(/(?<!\d)([4-9]\d)(?!\d)/);
+    const m = t.match(/(?<!\d)(4[3-9]|[5-9]\d)(?!\d)/);
     if (m) return 2500 + parseInt(m[1], 10);
   }
 
   // Tier 4 — 2-digit short CE 00–42 (e.g. 26 → 2026 → 2569)
   // Body excluded: day numbers like "วันที่ 15" are too noisy.
   for (const t of noBody) {
-    const m = t.match(/(?<!\d)([0-3]\d)(?!\d)/);
+    const m = t.match(/(?<!\d)([0-3]\d|4[0-2])(?!\d)/);
     if (m) return 2000 + parseInt(m[1], 10) + 543;
   }
 
@@ -520,12 +520,21 @@ export function extractScoreFromRows(rows) {
       GRAND_TOTAL_LABELS.some((label) => s.includes(label))
     );
     if (labelCells.length > 0) {
-      // Skip year filter: this row is confirmed to be a grand-total row, so any
-      // number in it is a score even if it falls in a year-like integer range (e.g. 2607).
-      const nums = collectCandidates([row], true);
+      // Prefer non-year-like candidates first: a confirmed grand-total row can
+      // still contain an unrelated year reference in another cell (e.g. a
+      // "ปี 2568" note sharing the row), and blindly allowing year-like values
+      // for the WHOLE row let that coincidental year outrank the real
+      // (possibly smaller) total via Math.max below. Only fall back to
+      // year-like candidates when the row has no non-year-like number at all
+      // — i.e. the real total itself lands in the BE-year integer range
+      // (e.g. 2607).
+      const nonYearNums = collectCandidates([row], false);
+      const nums = nonYearNums.length > 0 ? nonYearNums : collectCandidates([row], true);
       // Also extract numbers embedded inside the label cells themselves.
       // Handles the case where label and score share one cell, e.g.:
       //   "รวมทั้งหมด  = 11011.5"
+      // Safe to skip the year filter here regardless — these numbers come
+      // from the label cell's own text, not an unrelated cell in the row.
       const embedded = labelCells.flatMap((s) => numsFromText(s, true));
       grandCandidates.push(...nums, ...embedded);
     }
@@ -566,6 +575,17 @@ export function extractScoreFromRows(rows) {
   const all = collectCandidates(rows);
   if (all.length > 0) {
     return { score: Math.max(...all), method: "largest in sheet" };
+  }
+
+  // Step 3b: same scan, but allow year-like integers (2400–2699) too. Reached
+  // only when Step 3 found nothing at all — i.e. every number in the sheet
+  // was excluded solely for looking like a year. A legitimate whole-number
+  // score can land in that range (e.g. 2550), and without this fallback it
+  // would be silently discarded in favour of the much weaker weight×day
+  // computation below (or "no candidates found").
+  const allIncludingYearLike = collectCandidates(rows, true);
+  if (allIncludingYearLike.length > 0) {
+    return { score: Math.max(...allIncludingYearLike), method: "largest in sheet (year-like fallback)" };
   }
 
   // Step 4: weight × day-count computation (last resort for cm="1" formula-only sheets)
