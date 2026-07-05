@@ -54,6 +54,10 @@ const pageTemplates = {}
 for (const p of gatedPages) {
   pageTemplates[p] = fs.readFileSync(path.join(__dirname, p, "index.html"), "utf8")
 }
+// /verify/ also carries the same <meta name="p4p-session"> placeholder, used
+// only for the silent LINE-bind bounce (see servePage's "bind_required"
+// redirect below) — every other visit serves this same template unmodified.
+const verifyTemplate = fs.readFileSync(path.join(__dirname, "verify", "index.html"), "utf8")
 
 function parseCookies(req) {
   const out = {}
@@ -86,19 +90,77 @@ function readSessionCookie(req) {
   } catch (e) { /* legacy cookie held a bare refresh token */ }
   return { at: null, rt: raw }
 }
-// Read a JWT's `exp` (unix seconds) without verifying it. 0 if unreadable.
-function jwtExp(token) {
+// Read a JWT's payload without verifying it (the token itself was already
+// validated by Supabase at /auth/session or the refresh call below — this is
+// just for reading claims out of a token we already trust).
+function jwtPayload(token) {
   try {
     const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
-    const exp = JSON.parse(Buffer.from(b64, "base64").toString("utf8")).exp
-    return typeof exp === "number" ? exp : 0
-  } catch (e) { return 0 }
+    return JSON.parse(Buffer.from(b64, "base64").toString("utf8"))
+  } catch (e) { return {} }
+}
+function jwtExp(token) { return typeof jwtPayload(token).exp === "number" ? jwtPayload(token).exp : 0 }
+function jwtEmail(token) { return jwtPayload(token).email || null }
+
+// Resolve a usable access token from the session cookie: reuse the cached one
+// while it's fresh, otherwise refresh once (rotating the cookie). Returns
+// { at: null, reason } on failure — no cookie ("no_session") or a failed
+// refresh ("expired", cookie cleared) — or { at, reason: null } on success.
+async function resolveAccessToken(req, res) {
+  const sess = readSessionCookie(req)
+  if (!sess) return { at: null, reason: "no_session" }
+
+  let at = sess.at
+  // Refresh only when the cached access token is missing or within 60s of
+  // expiry — so a normal browsing session refreshes ~once an hour, not per page.
+  if (!at || jwtExp(at) < Date.now() / 1000 + 60) {
+    try {
+      const r = await axios.post(
+        SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token",
+        { refresh_token: sess.rt },
+        { headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
+      )
+      at = r.data && r.data.access_token
+      if (!at) throw new Error("no access_token in refresh response")
+      setSessionCookie(res, at, r.data.refresh_token || sess.rt)
+    } catch (e) {
+      clearSessionCookie(res)
+      return { at: null, reason: "expired" }
+    }
+  }
+  return { at, reason: null }
 }
 
-// Serve a gated page: require a valid session cookie; reuse the cached access
-// token while it's fresh, otherwise refresh once (rotating the cookie); inject
-// the token via <meta> (no inline script -> no CSP change). No/invalid cookie
-// or a failed refresh -> redirect to /verify/.
+// Single-round-trip check against scripts/line-bind-gate.sql's
+// get_line_bind_gate_status RPC: is this email denylisted, does it already
+// have a LINE userId bound, and how many failed bind attempts so far. Uses
+// the anon key (same posture as is_sender_allowlisted — a yes/no/count
+// oracle callable pre-login, never exposes the underlying rows). Fails OPEN
+// (returns null) on any error — a transient Supabase hiccup must not lock
+// everyone out of pages they already have a valid session for; the
+// underlying data queries are still protected by RLS regardless.
+async function getLineBindGateStatus(email) {
+  try {
+    const r = await axios.post(
+      SUPABASE_URL + "/rest/v1/rpc/get_line_bind_gate_status",
+      { p_email: email },
+      { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
+    )
+    return (r.data && r.data[0]) || null
+  } catch (e) {
+    return null
+  }
+}
+
+const BIND_ATTEMPT_LIMIT = 3
+
+// Serve a gated page: require a valid session cookie and inject the current
+// access token via <meta> (no inline script -> no CSP change). On top of
+// session validity, also enforce the LINE-binding rule: a denylisted email is
+// bounced out even with a valid session, and an email with no LINE userId
+// bound yet (and still under the retry limit) is routed to /verify/ to
+// silently complete that binding using its EXISTING session — no OTP
+// re-entry — before it's allowed to reach the actual page.
 function servePage(name) {
   return async (req, res) => {
     // Canonicalize to a trailing slash first. LIFF opens "/status" (no slash),
@@ -109,27 +171,23 @@ function servePage(name) {
       return res.redirect(302, "/" + name + "/" + req.originalUrl.slice(req.path.length))
     }
     const ret = encodeURIComponent(req.originalUrl)
-    const sess = readSessionCookie(req)
-    if (!sess) return res.redirect(302, "/verify/?return=" + ret + "&reason=no_session")
+    const { at, reason } = await resolveAccessToken(req, res)
+    if (!at) return res.redirect(302, "/verify/?return=" + ret + "&reason=" + reason)
 
-    let at = sess.at
-    // Refresh only when the cached access token is missing or within 60s of
-    // expiry — so a normal browsing session refreshes ~once an hour, not per page.
-    if (!at || jwtExp(at) < Date.now() / 1000 + 60) {
-      try {
-        const r = await axios.post(
-          SUPABASE_URL + "/auth/v1/token?grant_type=refresh_token",
-          { refresh_token: sess.rt },
-          { headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
-        )
-        at = r.data && r.data.access_token
-        if (!at) throw new Error("no access_token in refresh response")
-        setSessionCookie(res, at, r.data.refresh_token || sess.rt)
-      } catch (e) {
-        clearSessionCookie(res)
-        return res.redirect(302, "/verify/?return=" + ret + "&reason=expired")
+    const email = jwtEmail(at)
+    if (email) {
+      const gate = await getLineBindGateStatus(email)
+      if (gate) {
+        if (gate.is_blocked) {
+          clearSessionCookie(res)
+          return res.redirect(302, "/verify/?reason=blocked")
+        }
+        if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
+          return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required")
+        }
       }
     }
+
     res.setHeader("Content-Type", "text/html; charset=utf-8")
     res.send(pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at))
   }
@@ -279,6 +337,25 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
 for (const p of gatedPages) {
   app.get(["/" + p, "/" + p + "/"], servePage(p))
 }
+
+// /verify/ itself: for everyone this is the normal unauthenticated page
+// (served byte-identical to the plain static file). The ONE exception is the
+// "bind_required" bounce from servePage() above — a session that's valid but
+// still needs its LINE userId bound. In that case only, inject the existing
+// access token so the page can silently complete the bind (see verify/app.js)
+// without making the physician re-enter their email/OTP. Registered before
+// the static mount below for the same reason as the gated pages.
+app.get(["/verify", "/verify/"], async (req, res) => {
+  if (!req.path.endsWith("/")) {
+    return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length))
+  }
+  res.setHeader("Content-Type", "text/html; charset=utf-8")
+  if (req.query.reason !== "bind_required") {
+    return res.send(verifyTemplate)
+  }
+  const { at } = await resolveAccessToken(req, res)
+  res.send(at ? verifyTemplate.replace(PAGE_TOKEN_PLACEHOLDER, at) : verifyTemplate)
+})
 
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))

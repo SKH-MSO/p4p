@@ -15,15 +15,22 @@
 
         const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
-        // ── LINE userId binding (traceability only, not an auth factor) ────────
+        // ── LINE userId binding — REQUIRED, not best-effort ─────────────────────
+        // Business rule: we must know every physician's LINE userId as of their
+        // first verification. liff.init() itself can still fail silently (no
+        // LINE-side consequence if it does — see attemptLineBind/runLineBindFlow
+        // below for how a failure is actually handled: retried, then — after
+        // BIND_ATTEMPT_LIMIT tries recorded server-side — let through anyway with
+        // an admin alert, so a genuine device/permission problem can't lock a
+        // physician out of a monthly-use tool forever).
+        //
         // Any of the three LIFF apps registered for this LINE channel works here —
         // liff.getProfile()'s userId is scoped to the channel (2008561527), not to
         // the individual LIFF app id (see scripts/setup-richmenu.mjs /
-        // scripts/update-month-picker.mjs for the other two). Runs in the
-        // background; a failure here must never block login.
+        // scripts/update-month-picker.mjs for the other two).
         const LIFF_ID = "2008561527-a0xP1XmY"
         const liffReady = liff.init({ liffId: LIFF_ID }).then(() => true).catch((err) => {
-            console.warn("liff.init failed (binding will be skipped):", err)
+            console.warn("liff.init failed:", err)
             return false
         })
 
@@ -52,9 +59,122 @@
         const reqEmail    = document.getElementById("req-email")
         const requestSubmit = document.getElementById("request-submit")
         const requestBack = document.getElementById("request-back")
+        const bindStep       = document.getElementById("bind-step")
+        const bindStatusText = document.getElementById("bind-status-text")
+        const bindRetryBtn   = document.getElementById("bind-retry-btn")
         const msg         = document.getElementById("msg")
 
         let currentEmail = ""
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        // Declared here (before the bind-only early-return below) rather than
+        // further down: the bind flow's async callbacks reference these, and if
+        // bind-only mode returns early, a `const` declared after that return
+        // point is never reached — a later reference to it from an already-
+        // in-flight async callback throws (temporal dead zone), which was
+        // silently swallowed into the bind flow's own .catch() as a false
+        // "bind failed" the first time this shipped. Keep these above ANY early
+        // return in this file.
+        const showError  = (text) => { msg.className = "msg error";  msg.textContent = text }
+        const showOk     = (text) => { msg.className = "msg ok";     msg.textContent = text }
+        const showNotice = (text) => { msg.className = "msg notice"; msg.textContent = text }
+        const clearMsg   = ()     => { msg.className = "msg";        msg.textContent = "" }
+        const busy = (btn, on, label) => {
+            btn.disabled = on
+            btn.innerHTML = on ? '<span class="spinner"></span>' + label : label
+        }
+
+        // ── Shared LINE-bind flow — used by BOTH entry points ───────────────────
+        //   1. Fresh OTP verify (codeStep handler): token = data.session.access_token
+        //   2. Silent bind bounce (server injected <meta name="p4p-session">):
+        //      token = the injected token, no OTP involved at all
+        // A retry here must NEVER re-run verifyOtp() — OTP codes are single-use,
+        // so retrying the whole form would fail on the already-consumed code.
+        // Instead the retry button just re-attempts the bind itself with the
+        // SAME still-valid access token.
+        function buildAuthedClient(accessToken) {
+            return supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
+                // Don't reuse `db` / rely on supabase-js's own session bookkeeping —
+                // this project already found that unreliable inside LINE's in-app
+                // webview (same reason /auth/session extracts tokens directly
+                // instead of trusting client-side persistence). Attaching the
+                // token explicitly as a header works regardless of that quirk.
+                auth: { persistSession: false, autoRefreshToken: false },
+                global: { headers: { Authorization: `Bearer ${accessToken}` } },
+            })
+        }
+
+        async function attemptLineBind(accessToken) {
+            const inited = await liffReady
+            if (!inited || !liff.isLoggedIn()) throw new Error("LIFF not available")
+            const profile = await liff.getProfile()
+            const { error } = await buildAuthedClient(accessToken).rpc("bind_line_user_id", {
+                p_line_user_id: profile.userId,
+                p_line_display_name: profile.displayName || null,
+            })
+            if (error) throw error
+        }
+
+        // Records one failed attempt server-side and returns the running count.
+        // If the RPC call itself can't even be reached, fail OPEN (treat as if
+        // the limit were hit) — a physician must never be trapped by a failure
+        // in the failure-recording mechanism itself.
+        async function recordBindFailure(accessToken) {
+            try {
+                const { data, error } = await buildAuthedClient(accessToken).rpc("record_bind_failure")
+                if (error) throw error
+                return typeof data === "number" ? data : BIND_ATTEMPT_LIMIT
+            } catch (err) {
+                console.warn("record_bind_failure failed:", err)
+                return BIND_ATTEMPT_LIMIT
+            }
+        }
+
+        const BIND_ATTEMPT_LIMIT = 3
+        let currentBindToken = null
+
+        // Drives the bind-step UI end to end: attempt -> success (redirect) or
+        // failure -> record it -> under the limit (show retry) or at the limit
+        // (let them through anyway; scripts/line-bind-gate.sql already fired a
+        // one-time Telegram alert to the admin at that point).
+        function runLineBindFlow(accessToken) {
+            currentBindToken = accessToken
+            emailStep.classList.add("hidden")
+            codeStep.classList.add("hidden")
+            requestStep.classList.add("hidden")
+            bindStep.classList.remove("hidden")
+            bindRetryBtn.classList.add("hidden")
+            bindStatusText.innerHTML = '<span class="spinner spinner-dark"></span>กำลังยืนยันบัญชี LINE ของท่าน โปรดรอสักครู่...'
+
+            attemptLineBind(accessToken).then(() => {
+                showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
+                location.replace(RETURN_TO)
+            }).catch(async (err) => {
+                console.warn("LINE bind failed:", err)
+                const attempts = await recordBindFailure(accessToken)
+                if (attempts >= BIND_ATTEMPT_LIMIT) {
+                    bindStatusText.textContent = "ข้ามขั้นตอนนี้ชั่วคราว กำลังนำท่านเข้าสู่ระบบ..."
+                    setTimeout(() => location.replace(RETURN_TO), 1200)
+                } else {
+                    bindStatusText.textContent = "ไม่สามารถยืนยันบัญชี LINE ได้ กรุณาลองใหม่อีกครั้ง"
+                    bindRetryBtn.classList.remove("hidden")
+                }
+            })
+        }
+        bindRetryBtn.addEventListener("click", () => runLineBindFlow(currentBindToken))
+
+        // ── Silent-bind bounce ───────────────────────────────────────────────────
+        // main.js redirects an already-verified-but-unbound session here with a
+        // real access token injected into <meta name="p4p-session"> (see
+        // servePage's "bind_required" case) instead of the usual placeholder.
+        // When that's the case, skip straight to the bind flow — no email/OTP
+        // entry needed, this person is already logged in.
+        const sessionMeta = document.querySelector('meta[name="p4p-session"]')
+        const injectedToken = sessionMeta ? sessionMeta.getAttribute("content") : ""
+        if (injectedToken && injectedToken !== "__P4P_ACCESS_TOKEN__") {
+            runLineBindFlow(injectedToken)
+            return
+        }
 
         // ── Physician-name dropdown (request-access step) ───────────────────────
         // Populated from every roster table combined (list_all_physicians RPC —
@@ -85,16 +205,6 @@
             }
         }
         loadPhysicianNames()
-
-        // ── Helpers ───────────────────────────────────────────────────────────
-        const showError  = (text) => { msg.className = "msg error";  msg.textContent = text }
-        const showOk     = (text) => { msg.className = "msg ok";     msg.textContent = text }
-        const showNotice = (text) => { msg.className = "msg notice"; msg.textContent = text }
-        const clearMsg   = ()     => { msg.className = "msg";        msg.textContent = "" }
-        const busy = (btn, on, label) => {
-            btn.disabled = on
-            btn.innerHTML = on ? '<span class="spinner"></span>' + label : label
-        }
 
         // ── Pending-email persistence ─────────────────────────────────────────
         // To read the OTP the user must leave LINE for their email app and come
@@ -179,11 +289,15 @@
         }
 
         // Why did the server send us here? "expired" = the session lapsed;
-        // "no_session" is the everyday logged-out case and stays silent.
+        // "blocked" = revoked via blocked_emails (a valid session is not enough —
+        // main.js re-checks the denylist on every gated-page request); "no_session"
+        // is the everyday logged-out case and stays silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === "expired"
+        const reasonShown = bounceReason === "expired" || bounceReason === "blocked"
         if (bounceReason === "expired") {
             showNotice("เซสชันหมดอายุ กรุณายืนยันตัวตนอีกครั้ง")
+        } else if (bounceReason === "blocked") {
+            showError("บัญชีของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ")
         }
 
         // If a verification was in progress before a reload, restore the code step.
@@ -276,36 +390,11 @@
                 })
                 if (!resp.ok) throw new Error("session POST failed: " + resp.status)
 
-                // Best-effort: record which LINE account this email belongs to.
-                // Never blocks login — a failure here just means no binding yet.
-                //
-                // IMPORTANT: don't reuse `db` for this. `db` was created with
-                // persistSession/autoRefreshToken off, and this project already hit
-                // (and worked around, see /auth/session above) the fact that
-                // supabase-js's own in-memory session bookkeeping after verifyOtp()
-                // is unreliable inside LINE's in-app webview. Relying on it here
-                // would send the RPC unauthenticated, so bind_line_user_id's
-                // auth.jwt() lookup would silently see no user and no-op. Instead,
-                // attach the just-issued access token to a fresh client explicitly.
-                try {
-                    const inited = await liffReady
-                    if (inited && liff.isLoggedIn()) {
-                        const profile = await liff.getProfile()
-                        const authedDb = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
-                            auth: { persistSession: false, autoRefreshToken: false },
-                            global: { headers: { Authorization: `Bearer ${data.session.access_token}` } },
-                        })
-                        await authedDb.rpc("bind_line_user_id", {
-                            p_line_user_id: profile.userId,
-                            p_line_display_name: profile.displayName || null,
-                        })
-                    }
-                } catch (bindErr) {
-                    console.warn("LINE userId binding skipped:", bindErr)
-                }
-
-                showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
-                location.replace(RETURN_TO)
+                // Session is live at this point. Binding the LINE userId is now a
+                // REQUIRED step, not best-effort — runLineBindFlow takes over the UI
+                // from here (retry-on-failure, then give up after BIND_ATTEMPT_LIMIT
+                // and let them through) and handles the final redirect itself.
+                runLineBindFlow(data.session.access_token)
             } catch (err) {
                 console.error(err)
                 busy(codeSubmit, false, "ยืนยัน")
