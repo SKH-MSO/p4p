@@ -14,12 +14,6 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-// For the /admin/* pages (single shared password, not per-physician auth —
-// see requireAdmin below). Distinct from the physician OTP gate: line_user_bindings
-// has no anon/authenticated RLS policy at all, so only the service_role key can
-// read it, and only this password-gated route is allowed to use that key for reads.
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD
-
 const headers = {
   "Content-Type": "application/json",
   "Authorization": "Bearer " + LINE_ACCESS_TOKEN
@@ -47,7 +41,6 @@ const {
 // the page. The browser only ever holds a short-lived access token in memory.
 const fs = require("node:fs")
 const path = require("node:path")
-const crypto = require("node:crypto")
 const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
 const SUPABASE_ANON = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
 const RT_COOKIE = "p4p_rt"
@@ -279,56 +272,6 @@ app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) 
   // button spinner would time out with no confirmation ever showing.
   res.sendStatus(200)
 })
-
-// HTTP Basic Auth gate for /admin/*. This is a single shared password (not the
-// per-physician OTP flow the other pages use) because there's exactly one admin
-// and no per-user rows to check against — a shared secret is the right amount of
-// mechanism here. Browsers cache the credential per-origin after the first
-// prompt, so this also covers the JSON API route below without a second login.
-function requireAdmin(req, res, next) {
-  res.setHeader("WWW-Authenticate", 'Basic realm="P4P Admin"')
-  if (!ADMIN_PASSWORD) {
-    console.error("[admin] ADMIN_PASSWORD not set — admin routes disabled")
-    return res.status(503).send("Admin access is not configured.")
-  }
-  const [scheme, encoded] = (req.headers.authorization || "").split(" ")
-  const decoded = scheme === "Basic" && encoded ? Buffer.from(encoded, "base64").toString("utf8") : ""
-  const password = decoded.slice(decoded.indexOf(":") + 1)
-  // Constant-time compare so response timing can't leak how many characters matched.
-  const given = Buffer.from(password)
-  const expected = Buffer.from(ADMIN_PASSWORD)
-  const match = given.length === expected.length && crypto.timingSafeEqual(given, expected)
-  if (!match) return res.status(401).send("Authentication required.")
-  next()
-}
-
-// Read-only lookup for scripts/bind-line-user.sql's line_user_bindings table —
-// which email (verified via /verify/'s OTP gate) is bound to which LINE userId.
-// Covers both existing physicians (bound on their first login) and newcomers
-// (bound the same way once an admin approves their access request and they log
-// in), since binding happens uniformly at OTP-verification time regardless of
-// how the physician got allow-listed. Uses the service_role key because the
-// table has no anon/authenticated RLS policy at all (by design — see the SQL
-// file) — this route is the one place besides the dashboard allowed to read it.
-app.get("/admin/api/line-bindings", requireAdmin, async (req, res) => {
-  if (!SUPABASE_SERVICE_ROLE_KEY) return res.status(503).json({ error: "service role key not configured" })
-  try {
-    const r = await axios.get(SUPABASE_URL + "/rest/v1/line_user_bindings", {
-      params: { select: "email,line_user_id,line_display_name,bound_at", order: "bound_at.desc" },
-      headers: {
-        apikey: SUPABASE_SERVICE_ROLE_KEY,
-        Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
-      },
-      timeout: 8000,
-    })
-    res.json(r.data)
-  } catch (e) {
-    console.error("[admin] line-bindings fetch failed:", e.response ? e.response.status + " " + JSON.stringify(e.response.data) : e.message)
-    res.status(502).json({ error: "fetch failed" })
-  }
-})
-
-app.use("/admin", requireAdmin, express.static("admin"))
 
 // Gated pages: server-validated + token injected (must be registered BEFORE the
 // static mounts so "/status/" hits the handler, while "/status/app.js" etc.
