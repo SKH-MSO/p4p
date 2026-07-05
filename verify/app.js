@@ -29,8 +29,10 @@
         // the individual LIFF app id (see scripts/setup-richmenu.mjs /
         // scripts/update-month-picker.mjs for the other two).
         const LIFF_ID = "2008561527-a0xP1XmY"
+        let liffInitError = null
         const liffReady = liff.init({ liffId: LIFF_ID }).then(() => true).catch((err) => {
             console.warn("liff.init failed:", err)
+            liffInitError = err
             return false
         })
 
@@ -62,6 +64,7 @@
         const bindStep       = document.getElementById("bind-step")
         const bindStatusText = document.getElementById("bind-status-text")
         const bindRetryBtn   = document.getElementById("bind-retry-btn")
+        const bindDebugLog   = document.getElementById("bind-debug-log")
         const msg         = document.getElementById("msg")
 
         let currentEmail = ""
@@ -104,15 +107,36 @@
             })
         }
 
+        // Describes ANY error (JS Error, Supabase PostgrestError, string, etc.)
+        // into one readable line — used for the on-screen debug log below, since
+        // the physician's device is otherwise a black box with no console access.
+        function describeError(err) {
+            if (!err) return "unknown error"
+            const parts = []
+            if (err.message) parts.push(err.message)
+            if (err.details) parts.push("details: " + err.details)
+            if (err.hint) parts.push("hint: " + err.hint)
+            if (err.code) parts.push("code: " + err.code)
+            return parts.length ? parts.join(" | ") : String(err)
+        }
+
         async function attemptLineBind(accessToken) {
             const inited = await liffReady
-            if (!inited || !liff.isLoggedIn()) throw new Error("LIFF not available")
-            const profile = await liff.getProfile()
+            if (!inited) throw new Error("liff.init failed: " + describeError(liffInitError))
+            if (!liff.isLoggedIn()) throw new Error("liff.isLoggedIn() returned false")
+
+            let profile
+            try {
+                profile = await liff.getProfile()
+            } catch (err) {
+                throw new Error("liff.getProfile failed: " + describeError(err))
+            }
+
             const { error } = await buildAuthedClient(accessToken).rpc("bind_line_user_id", {
                 p_line_user_id: profile.userId,
                 p_line_display_name: profile.displayName || null,
             })
-            if (error) throw error
+            if (error) throw new Error("bind_line_user_id RPC failed: " + describeError(error))
         }
 
         // Records one failed attempt server-side and returns the running count.
@@ -151,6 +175,10 @@
                 location.replace(RETURN_TO)
             }).catch(async (err) => {
                 console.warn("LINE bind failed:", err)
+                const ts = new Date().toISOString().slice(11, 19)
+                bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
+                bindDebugLog.classList.remove("hidden")
+
                 const attempts = await recordBindFailure(accessToken)
                 if (attempts >= BIND_ATTEMPT_LIMIT) {
                     bindStatusText.textContent = "ข้ามขั้นตอนนี้ชั่วคราว กำลังนำท่านเข้าสู่ระบบ..."
