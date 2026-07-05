@@ -54,8 +54,10 @@ already-applied file is safe.
 11. `scripts/email-sent-log-setup.sql` — `email_sent_log` table + RLS
     (score-tracker dedup).
 12. `scripts/telegram-approve-buttons.sql` +
-    `scripts/telegram-approve-sender-display-name.sql` — Telegram
-    approve/reject buttons on the access-request alert.
+    `scripts/telegram-approve-sender-display-name.sql` +
+    `scripts/telegram-approve-name-match.sql` — Telegram approve/reject
+    buttons on the access-request alert, the cross-check email display name,
+    and a match/mismatch indicator comparing the two.
 13. `scripts/notify-access-request.sql` and
     `scripts/auth-hook-restrict-signups.sql` — both explicitly marked
     "TEMPLATE — verify before enabling" in-file; review before running.
