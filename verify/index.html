@@ -146,6 +146,23 @@
 
         .hidden { display: none !important; }
 
+        #bind-debug-log {
+            margin-top: 14px;
+            padding: 10px 12px;
+            background: var(--tertiary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-family: ui-monospace, "SF Mono", Consolas, monospace;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 220px;
+            overflow-y: auto;
+            text-align: left;
+        }
+
         .spinner {
             display: inline-block;
             width: 14px; height: 14px;
@@ -234,6 +251,7 @@
             <div id="bind-step" class="hidden">
                 <p class="hint" id="bind-status-text"><span class="spinner spinner-dark"></span>กำลังยืนยันบัญชี LINE ของท่าน โปรดรอสักครู่...</p>
                 <button id="bind-retry-btn" type="button" class="hidden">ลองอีกครั้ง</button>
+                <pre id="bind-debug-log" class="hidden"></pre>
             </div>
 
             <div id="msg" class="msg"></div>
