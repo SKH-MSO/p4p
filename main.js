@@ -172,12 +172,26 @@ function servePage(name) {
     // but the page's relative <script src="app.js"> only resolves to
     // /status/app.js when the URL ends in "/". Without this the page script
     // 404s and never runs. (express.static used to do this redirect for us.)
+    //
+    // Every redirect target below ends in a literal "#" for the same reason:
+    // LINE's LIFF platform appends "#access_token=...&id_token=..." (its OWN
+    // per-LIFF-app session bootstrap, not ours) to the URL when a LIFF app is
+    // first opened. A URL fragment is never sent to the server, so we can't
+    // see or drop it directly — but if OUR redirect's Location header has no
+    // fragment of its own, WebKit (LINE's iOS in-app browser) carries the
+    // OLD fragment forward onto the new URL. That stale, wrong-LIFF-app
+    // token then rides along into /verify/, where liff.init() sees a
+    // mismatch against the (different) LIFF id it's initializing with and
+    // fails with "Invalid LIFF ID" — reproducibly, regardless of which LIFF
+    // app the physician actually entered through. An explicit trailing "#"
+    // gives the browser a fragment of our own (empty) to use, so it stops
+    // carrying the old one forward.
     if (!req.path.endsWith("/")) {
-      return res.redirect(302, "/" + name + "/" + req.originalUrl.slice(req.path.length))
+      return res.redirect(302, "/" + name + "/" + req.originalUrl.slice(req.path.length) + "#")
     }
     const ret = encodeURIComponent(req.originalUrl)
     const { at, reason } = await resolveAccessToken(req, res)
-    if (!at) return res.redirect(302, "/verify/?return=" + ret + "&reason=" + reason)
+    if (!at) return res.redirect(302, "/verify/?return=" + ret + "&reason=" + reason + "#")
 
     const email = jwtEmail(at)
     if (email) {
@@ -185,10 +199,10 @@ function servePage(name) {
       if (gate) {
         if (gate.is_blocked) {
           clearSessionCookie(res)
-          return res.redirect(302, "/verify/?reason=blocked")
+          return res.redirect(302, "/verify/?reason=blocked#")
         }
         if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
-          return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required")
+          return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
         }
       }
     }
@@ -356,7 +370,9 @@ for (const p of gatedPages) {
 // the static mount below for the same reason as the gated pages.
 app.get(["/verify", "/verify/"], async (req, res) => {
   if (!req.path.endsWith("/")) {
-    return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length))
+    // Trailing "#" clears any stale LIFF session fragment carried over from
+    // the referring page — see the comment in servePage() above.
+    return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length) + "#")
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8")
   if (req.query.reason !== "bind_required") {
