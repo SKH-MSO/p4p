@@ -24,11 +24,16 @@
         // an admin alert, so a genuine device/permission problem can't lock a
         // physician out of a monthly-use tool forever).
         //
-        // Any of the three LIFF apps registered for this LINE channel works here —
-        // liff.getProfile()'s userId is scoped to the channel (2008561527), not to
-        // the individual LIFF app id (see scripts/setup-richmenu.mjs /
-        // scripts/update-month-picker.mjs for the other two).
-        const LIFF_ID = "2008561527-a0xP1XmY"
+        // Dedicated LIFF app for THIS page. liff.init() requires the current
+        // page to match the LIFF app's registered Endpoint URL — it is NOT
+        // enough for the id to belong to the same LINE channel. /verify/ is
+        // reached via an internal 302 redirect from /status, /ranking, or
+        // /list (each of which has ITS OWN LIFF app + endpoint — see
+        // scripts/setup-richmenu.mjs / scripts/update-month-picker.mjs), so
+        // initializing with any of THOSE ids here failed with "Invalid LIFF
+        // ID" / INIT_FAILED regardless of entry point. This id's Endpoint
+        // URL is set to /verify/ specifically, matching where this actually runs.
+        const LIFF_ID = "2008561527-AShTrJz0"
         let liffInitError = null
         const liffReady = liff.init({ liffId: LIFF_ID }).then(() => true).catch((err) => {
             console.warn("liff.init failed:", err)
