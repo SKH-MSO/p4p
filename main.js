@@ -137,21 +137,24 @@ function servePage(name) {
 
 // Security headers for the web UI. The Content-Security-Policy makes the
 // email-verification gate more than cosmetic against XSS: script-src is limited
-// to our own origin + the Supabase CDN, with NO 'unsafe-inline', so an injected
-// <script> or on*="" handler won't execute (all page JS was moved to external
-// app.js files for exactly this reason). style-src keeps 'unsafe-inline' because
-// the pages set element styles and load Google Fonts CSS; connect-src allows the
-// Supabase REST/Realtime endpoints. frame-ancestors is intentionally omitted so
-// the pages still load inside LINE's LIFF webview.
+// to our own origin + the Supabase CDN + LINE's LIFF SDK CDN, with NO
+// 'unsafe-inline', so an injected <script> or on*="" handler won't execute (all
+// page JS was moved to external app.js files for exactly this reason). style-src
+// keeps 'unsafe-inline' because the pages set element styles and load Google
+// Fonts CSS; connect-src allows the Supabase REST/Realtime endpoints plus the
+// LINE API hosts the LIFF SDK calls internally (liff.init / liff.getProfile, used
+// on /verify/ to bind a LINE userId to the verified email — see
+// scripts/bind-line-user.sql). frame-ancestors is intentionally omitted so the
+// pages still load inside LINE's LIFF webview.
 const CSP = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "script-src 'self' https://cdn.jsdelivr.net",
+  "script-src 'self' https://cdn.jsdelivr.net https://static.line-scdn.net",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com",
   "img-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.line.me https://access.line.me",
 ].join("; ")
 app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy", CSP)

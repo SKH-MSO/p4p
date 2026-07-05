@@ -15,6 +15,18 @@
 
         const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
+        // ── LINE userId binding (traceability only, not an auth factor) ────────
+        // Any of the three LIFF apps registered for this LINE channel works here —
+        // liff.getProfile()'s userId is scoped to the channel (2008561527), not to
+        // the individual LIFF app id (see scripts/setup-richmenu.mjs /
+        // scripts/update-month-picker.mjs for the other two). Runs in the
+        // background; a failure here must never block login.
+        const LIFF_ID = "2008561527-a0xP1XmY"
+        const liffReady = liff.init({ liffId: LIFF_ID }).then(() => true).catch((err) => {
+            console.warn("liff.init failed (binding will be skipped):", err)
+            return false
+        })
+
         // ── Return target (open-redirect safe) ────────────────────────────────
         // Only accept same-origin paths: a single leading "/" that is not "//"
         // or "/\" (protocol-relative). Anything else falls back to /status/.
@@ -263,6 +275,21 @@
                     }),
                 })
                 if (!resp.ok) throw new Error("session POST failed: " + resp.status)
+
+                // Best-effort: record which LINE account this email belongs to.
+                // Never blocks login — a failure here just means no binding yet.
+                try {
+                    const inited = await liffReady
+                    if (inited && liff.isLoggedIn()) {
+                        const profile = await liff.getProfile()
+                        await db.rpc("bind_line_user_id", {
+                            p_line_user_id: profile.userId,
+                            p_line_display_name: profile.displayName || null,
+                        })
+                    }
+                } catch (bindErr) {
+                    console.warn("LINE userId binding skipped:", bindErr)
+                }
 
                 showOk("ยืนยันสำเร็จ กำลังนำท่านเข้าสู่ระบบ...")
                 location.replace(RETURN_TO)
