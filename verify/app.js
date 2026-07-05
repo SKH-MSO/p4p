@@ -278,11 +278,24 @@
 
                 // Best-effort: record which LINE account this email belongs to.
                 // Never blocks login — a failure here just means no binding yet.
+                //
+                // IMPORTANT: don't reuse `db` for this. `db` was created with
+                // persistSession/autoRefreshToken off, and this project already hit
+                // (and worked around, see /auth/session above) the fact that
+                // supabase-js's own in-memory session bookkeeping after verifyOtp()
+                // is unreliable inside LINE's in-app webview. Relying on it here
+                // would send the RPC unauthenticated, so bind_line_user_id's
+                // auth.jwt() lookup would silently see no user and no-op. Instead,
+                // attach the just-issued access token to a fresh client explicitly.
                 try {
                     const inited = await liffReady
                     if (inited && liff.isLoggedIn()) {
                         const profile = await liff.getProfile()
-                        await db.rpc("bind_line_user_id", {
+                        const authedDb = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
+                            auth: { persistSession: false, autoRefreshToken: false },
+                            global: { headers: { Authorization: `Bearer ${data.session.access_token}` } },
+                        })
+                        await authedDb.rpc("bind_line_user_id", {
                             p_line_user_id: profile.userId,
                             p_line_display_name: profile.displayName || null,
                         })
