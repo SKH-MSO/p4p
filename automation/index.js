@@ -12,7 +12,7 @@
 import { createGmailClient }             from "./gmail-client.js";
 import { createDriveClient }             from "./drive-client.js";
 import { analyseJson, resolveBeMonth, resolvePhysicianNameFromSheet } from "./claude-analyst.js";
-import { matchName, saveScore, logSubmission } from "./supabase-client.js";
+import { matchName, saveScore, logSubmission, bumpSenderMatch } from "./supabase-client.js";
 import { sendTelegram, formatResultMessage, formatErrorMessage } from "./telegram.js";
 import { buildHtmlReply }               from "./templates/reply.js";
 import { buildHtmlErrorReply }          from "./templates/error-reply.js";
@@ -465,7 +465,7 @@ async function sendAlertReply({ errorType = "other", safeFilename = "", detected
  * @param {string} context.messageId    Gmail message ID for thread reply
  * @param {object} context.gmail        Shared Gmail client instance
  */
-async function processBuffer(buffer, { subject = "", body = "", filename, replyTo = "", messageId = "", emailDate = null, threadId = null, gmail }) {
+async function processBuffer(buffer, { subject = "", body = "", filename, replyTo = "", senderDisplayName = "", messageId = "", emailDate = null, threadId = null, gmail }) {
   /** Shorthand: fire an "other" alert reply for unexpected pipeline errors. */
   const otherReply = () => sendAlertReply({
     errorType   : "other",
@@ -673,6 +673,21 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     } catch (logErr) {
       console.warn(`│        ⚠️  Submission log skipped (non-fatal): ${logErr.message}`);
     }
+
+    // ── Record sender → physician match (feeds the Telegram approve message) ──
+    try {
+      await bumpSenderMatch({
+        senderEmail       : replyTo,
+        senderDisplayName,
+        extractedName     : analysis.name,
+        matchedPhysician  : match.matchedName,
+        department        : match.department,
+        similarity        : match.similarity,
+      });
+      console.log(`│        🗂️   sender_physician_match updated`);
+    } catch (matchLogErr) {
+      console.warn(`│        ⚠️  sender_physician_match update skipped (non-fatal): ${matchLogErr.message}`);
+    }
   }
 
   // ── Telegram success notification ─────────────────────────────────────
@@ -845,6 +860,8 @@ async function main() {
     const msgBody   = msg.body?.trim() ?? "";
     const fromRaw   = msg.from ?? "";
     const fromEmail = (fromRaw.match(/<(.+?)>/) ?? [, fromRaw])[1].trim().toLowerCase();
+    const fromNameMatch    = fromRaw.match(/^(.*?)\s*<([^>]+)>\s*$/);
+    const fromDisplayName  = fromNameMatch ? fromNameMatch[1].trim().replace(/^"(.*)"$/, "$1") : "";
 
     console.log(`┌─ [${i + 1}/${messages.length}] [${_sourceLabel}] ──────────────────────────────────────────`);
     console.log(`│  Date:     ${msg.date}`);
@@ -946,6 +963,7 @@ async function main() {
           subject  : msg.subject,
           body     : msgBody,
           replyTo  : fromEmail,
+          senderDisplayName: fromDisplayName,
           messageId: id,
           emailDate: msg.date,
           threadId : msg.threadId,
@@ -1014,6 +1032,7 @@ async function main() {
       subject  : msg.subject,
       body     : msgBody,
       replyTo  : fromEmail,
+      senderDisplayName: fromDisplayName,
       messageId: id,
       emailDate: msg.date,
       threadId : msg.threadId,
