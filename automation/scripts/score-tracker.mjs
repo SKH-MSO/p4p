@@ -5,10 +5,17 @@
  * Triggered on the 1st of every month by GitHub Actions.
  *
  * Logic:
- *  Phase 1 — Per-department: gather 3-month status (all months, regardless of completeness).
+ *  Phase 1 — Per-department latest-complete scan: walk a rolling window of
+ *             months newest → oldest, and select only the latest consecutive
+ *             complete unsent months (see selectMonthsToSend). A department
+ *             gets emailed only when its newest months complete, reporting
+ *             those specific months, never older gaps. This ensures email
+ *             focuses on the latest progress, not catch-up backlog.
  *  Phase 2 — Group by head email: departments sharing the same head email are
  *             batched into ONE email (one email per person, not per department).
- *  Phase 3 — Send: one email per unique address.
+ *  Phase 3 — Send: one email per unique address, reporting only the month(s)
+ *             newly selected in Phase 1. Never resend months already logged
+ *             in email_sent_log (tracked per department per month).
  *
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -32,7 +39,26 @@ dotenvConfig({ override: true });
 
 // ── Configuration ─────────────────────────────────────────────────────────
 const EXEMPT_DEPTS = new Set(["INTERN"]);
-const CHECK_COUNT  = 3;
+// How far back to look for months a department hasn't been emailed for yet.
+// Wider than the old fixed 3-month display window so a department that falls
+// behind (submits weeks/months late) still gets caught up automatically.
+const CATCHUP_WINDOW_MONTHS = 12;
+// Never scan earlier than this month key, even if it's within the window
+// above. Months before this are out of scope for the automated catch-up —
+// pre-existing gaps back there (e.g. a month sitting at 0 submissions from
+// before the tracker's cutover) would otherwise permanently block every
+// later completed month from ever being reported (selectMonthsToSend always
+// stops at the first incomplete month it finds).
+const CATCHUP_START_MONTH = "2569_04";
+
+// ── Test-mode overrides (manual workflow_dispatch only, see score-tracker.yml) ──
+// Restrict to specific department(s) and/or redirect the email to a test
+// address instead of the real dept head — lets you verify a real send
+// end-to-end without touching a real department head's inbox. When
+// TEST_EMAIL is set, the run never writes to email_sent_log, so it has no
+// effect on the next real scheduled run.
+const TEST_DEPT_FILTER    = (process.env.TEST_DEPT ?? "").split(",").map(s => s.trim()).filter(Boolean);
+const TEST_EMAIL_OVERRIDE = process.env.TEST_EMAIL?.trim() || null;
 
 // ── Thai locale data ───────────────────────────────────────────────────────
 const THAI_MONTHS = {
@@ -47,6 +73,8 @@ const THAI_MONTHS_SHORT = {
 };
 
 // ── Date helpers ───────────────────────────────────────────────────────────
+
+/** Most-recent-first list of the `count` calendar months before this one. */
 function getPreviousMonths(count) {
   const now = new Date();
   let y = now.getFullYear();
@@ -64,12 +92,12 @@ function tableKeyToDisplay(key) {
   return `${THAI_MONTHS[month] ?? month} ${year}`;
 }
 
-// monthKeys ordered most-recent-first (as returned by getPreviousMonths) →
-// abbreviated range, oldest to newest, e.g. "เม.ย. - มิ.ย. 69" (or
-// "ธ.ค. 68 - ก.พ. 69" when the window crosses a BE year boundary).
+// monthKeys (any order) → abbreviated range, oldest to newest, e.g.
+// "เม.ย. - มิ.ย. 69" (or "ธ.ค. 68 - ก.พ. 69" when it crosses a BE year).
 function monthRangeShortLabel(monthKeys) {
-  const oldest = monthKeys[monthKeys.length - 1];
-  const newest = monthKeys[0];
+  const sorted = [...monthKeys].sort();
+  const oldest = sorted[0];
+  const newest = sorted[sorted.length - 1];
   const [oldYear, oldMonth] = oldest.split("_");
   const [newYear, newMonth] = newest.split("_");
   const oldLabel = THAI_MONTHS_SHORT[oldMonth] ?? oldMonth;
@@ -77,7 +105,7 @@ function monthRangeShortLabel(monthKeys) {
   const oldYY = oldYear.slice(-2);
   const newYY = newYear.slice(-2);
   return oldYear === newYear
-    ? `${oldLabel} - ${newLabel} ${newYY}`
+    ? (oldest === newest ? `${oldLabel} ${oldYY}` : `${oldLabel} - ${newLabel} ${newYY}`)
     : `${oldLabel} ${oldYY} - ${newLabel} ${newYY}`;
 }
 
@@ -97,6 +125,35 @@ function maskEmail(email) {
   return `${masked}@${domain}`;
 }
 
+// ── Selection logic (pure — covered by test/scoreTrackerCatchup.test.js) ───
+
+/**
+ * Given one department's window months ordered oldest → newest, pick the ones
+ * that are ready to email this run: only the latest consecutive complete
+ * unsent group. Walks backwards (newest first) until hitting an incomplete
+ * or already-sent month — ensures email shows only the newest completed
+ * month(s), not all older gaps. A month with no data (status === null — the
+ * department wasn't tracked that month) is skipped without blocking.
+ *
+ * @param {Array<{ key: string, status: { complete: boolean }|null }>} monthsAsc
+ * @param {Set<string>} alreadySentKeys  month keys already logged as sent for this dept
+ * @returns {Array<{ key: string, status: object }>}  latest complete unsent months, newest → oldest
+ */
+export function selectMonthsToSend(monthsAsc, alreadySentKeys) {
+  const monthsDesc = [...monthsAsc].reverse(); // newest first
+  const toSend = [];
+
+  for (const { key, status } of monthsDesc) {
+    if (alreadySentKeys.has(key)) break;  // already sent → stop, don't reach older months
+    if (status === null) continue;         // no data → skip, don't block
+    if (!status.complete) break;           // incomplete → stop
+    toSend.push({ key, status });
+  }
+
+  // toSend is in newest→oldest order from walking backwards; return as-is for newest-first display
+  return toSend;
+}
+
 // ── Supabase helpers ───────────────────────────────────────────────────────
 function createSB() {
   const { SUPABASE_URL, SUPABASE_KEY } = process.env;
@@ -109,7 +166,13 @@ async function getDeptStatus(sb, tableKey, dept, driveFileMap = null) {
     .from(tableKey)
     .select("firstname, lastname, score")
     .eq("department", dept);
-  if (error) throw new Error(`[${tableKey}/${dept}] Supabase: ${error.message}`);
+  if (error) {
+    // A window that reaches back further than a department/table's history
+    // is expected — treat "table doesn't exist" as "no data" rather than a
+    // fatal error (same pattern as process/report.js's getSupabasePersons).
+    if (error.code === "42P01" || /does not exist|schema cache/i.test(error.message)) return null;
+    throw new Error(`[${tableKey}/${dept}] Supabase: ${error.message}`);
+  }
   if (!data?.length) return null;
 
   const total   = data.length;
@@ -146,15 +209,22 @@ async function getDistinctDepts(sb, tableKeys) {
 }
 
 // ── Send-log helpers (email_sent_log) ───────────────────────────────────────
-// Prevents re-sending the same department's report if the run is retried or
-// manually re-triggered, and leaves an audit trail of when each report went out.
-async function getAlreadySent(sb, tableKey) {
+// Prevents re-sending a department's report for a month it's already been
+// emailed about, and leaves an audit trail of when each report went out.
+
+/** Fetch every (department → Set<monthKey>) already sent within the window. */
+async function getSentMonthsByDept(sb, monthKeys) {
   const { data, error } = await sb
     .from("email_sent_log")
-    .select("department")
-    .eq("table_name", tableKey);
-  if (error) { console.warn(`⚠️  email_sent_log read failed: ${error.message}`); return new Set(); }
-  return new Set(data.map(r => r.department));
+    .select("table_name, department")
+    .in("table_name", monthKeys);
+  if (error) { console.warn(`⚠️  email_sent_log read failed: ${error.message}`); return new Map(); }
+  const map = new Map();
+  for (const { table_name, department } of data) {
+    if (!map.has(department)) map.set(department, new Set());
+    map.get(department).add(table_name);
+  }
+  return map;
 }
 
 async function logEmailSent(sb, tableKey, department) {
@@ -174,25 +244,29 @@ async function main() {
 
   console.log(`\n${"═".repeat(62)}`);
   console.log(`  P4P Score Tracker  —  ${todayStr}`);
-  console.log(`  Checking last ${CHECK_COUNT} months`);
+  console.log(`  Catch-up window: last ${CATCHUP_WINDOW_MONTHS} months, not before ${tableKeyToDisplay(CATCHUP_START_MONTH)}`);
   console.log(`${"═".repeat(62)}\n`);
 
-  const months     = getPreviousMonths(CHECK_COUNT);
+  // most-recent first, floored at CATCHUP_START_MONTH so older stale gaps
+  // (e.g. a month stuck at 0 submissions from before the tracker's cutover)
+  // can't permanently block every later completed month
+  const monthsDesc = getPreviousMonths(CATCHUP_WINDOW_MONTHS).filter(key => key >= CATCHUP_START_MONTH);
+  const monthsAsc  = [...monthsDesc].reverse();                // oldest first — scan order
+  if (!monthsAsc.length) { console.log(`⚠️  No months in range (CATCHUP_START_MONTH ${CATCHUP_START_MONTH} is outside the ${CATCHUP_WINDOW_MONTHS}-month window) — nothing to do.`); return; }
   const sb         = createSB();
   const gmail      = createGmailClient();
   const DEPT_HEADS = await getDeptHeads();
 
-  console.log(`📅  Months: ${months.map(tableKeyToDisplay).join("  •  ")}\n`);
+  console.log(`📅  Window: ${tableKeyToDisplay(monthsAsc[0])} → ${tableKeyToDisplay(monthsAsc[monthsAsc.length - 1])}\n`);
 
   // ── Build Drive file maps (one API call per month, shared across all depts)
   const drive = process.env.P4P_FOLDER_ID ? createDriveClient() : null;
   const driveFileMaps = new Map(); // tableKey → Map<physicianName, fileId>
   if (drive) {
-    for (const key of months) {
+    for (const key of monthsAsc) {
       try {
         const fileMap = await drive.listMonthFiles(key);
         driveFileMaps.set(key, fileMap);
-        console.log(`📁  Drive ${tableKeyToDisplay(key)}: ${fileMap.size} files`);
       } catch (e) {
         console.warn(`⚠️  Drive lookup failed for ${key}: ${e.message}`);
       }
@@ -200,78 +274,114 @@ async function main() {
     console.log();
   }
 
-  const depts = await getDistinctDepts(sb, months);
+  let depts = await getDistinctDepts(sb, monthsDesc);
   if (!depts.length) { console.log("⚠️  No departments found — nothing to do."); return; }
+
+  if (TEST_DEPT_FILTER.length) {
+    depts = depts.filter(d => TEST_DEPT_FILTER.includes(d));
+    console.log(`🧪  TEST MODE — dept filter: ${TEST_DEPT_FILTER.join(", ")}`);
+    if (TEST_EMAIL_OVERRIDE) console.log(`🧪  TEST MODE — recipient override: ${maskEmail(TEST_EMAIL_OVERRIDE)} (email_sent_log will NOT be updated)`);
+    if (!depts.length) { console.log("⚠️  No matching department(s) found — nothing to do."); return; }
+  }
   console.log(`🏥  Departments: ${depts.join(", ")}\n`);
 
-  // ── Skip departments already reported for this month (dedup via email_sent_log)
-  const reportMonthKey = months[0]; // most-recent month = the one this run reports for
-  const alreadySent     = await getAlreadySent(sb, reportMonthKey);
-  const pendingDepts    = depts.filter(d => !alreadySent.has(d));
-  const skippedDepts    = depts.filter(d => alreadySent.has(d));
-  if (skippedDepts.length) {
-    console.log(`⏭️   Already sent for ${tableKeyToDisplay(reportMonthKey)}: ${skippedDepts.join(", ")}\n`);
-  }
+  const sentByDept = await getSentMonthsByDept(sb, monthsAsc);
 
-  // ── Phase 1: gather per-dept status for all 3 months ───────────────────
-  // deptData: dept → { monthsData }
-  const deptData = new Map();
+  // ── Phase 1: per-department catch-up scan ───────────────────────────────
+  // deptToSend: dept → [{ key, displayName, status }] (only newly-complete,
+  // not-yet-sent months — oldest → newest)
+  const deptToSend = new Map();
+  const blockedNote = new Map(); // dept → note for depts with nothing to send this run
 
-  for (const dept of pendingDepts) {
+  for (const dept of depts) {
     console.log(`┌─ ${dept}`);
-    const monthsData = [];
-    for (const key of months) {
+    const alreadySent = sentByDept.get(dept) ?? new Set();
+
+    const monthsWithStatus = [];
+    for (const key of monthsAsc) {
       const status = await getDeptStatus(sb, key, dept, driveFileMaps.get(key) ?? null);
-      monthsData.push({ key, displayName: tableKeyToDisplay(key), status });
-      const icon = !status ? "—" : status.complete ? "✓" : `✗ ค้าง ${status.missing}/${status.total}`;
-      console.log(`│   ${tableKeyToDisplay(key)}: ${icon}`);
+      monthsWithStatus.push({ key, status });
     }
-    console.log(`└─ รอส่งอีเมล\n`);
-    deptData.set(dept, { monthsData });
+
+    for (const { key, status } of monthsWithStatus) {
+      const sentTag = alreadySent.has(key) ? " (ส่งแล้ว)" : "";
+      const icon = !status ? "—" : status.complete ? "✓" : `✗ ค้าง ${status.missing}/${status.total}`;
+      console.log(`│   ${tableKeyToDisplay(key)}: ${icon}${sentTag}`);
+    }
+
+    const toSend = selectMonthsToSend(monthsWithStatus, alreadySent);
+
+    if (toSend.length > 0) {
+      console.log(`└─ พร้อมส่ง: ${toSend.map(m => tableKeyToDisplay(m.key)).join(", ")}\n`);
+      deptToSend.set(dept, toSend.map(({ key, status }) => ({ key, displayName: tableKeyToDisplay(key), status })));
+    } else {
+      // Explain why nothing's going out. selectMonthsToSend skips null-status
+      // (no data) months without blocking, so the real gap — if any — is the
+      // oldest unsent month that actually HAS data (mirrors its own logic;
+      // a plain "oldest unsent" would wrongly blame a no-data month instead).
+      const anyUnsent = monthsWithStatus.some(({ key }) => !alreadySent.has(key));
+      const oldestUnsentWithData = monthsWithStatus.find(({ key, status }) => !alreadySent.has(key) && status !== null);
+      const note = !anyUnsent
+        ? "ส่งครบแล้วทุกเดือนในช่วงที่ตรวจสอบ"
+        : !oldestUnsentWithData
+          ? "ไม่มีข้อมูลใหม่"
+          : `รอข้อมูลให้ครบ (${tableKeyToDisplay(oldestUnsentWithData.key)} ค้าง ${oldestUnsentWithData.status.missing}/${oldestUnsentWithData.status.total})`;
+      blockedNote.set(dept, note);
+      console.log(`└─ ไม่มีเดือนใหม่ที่พร้อมส่ง — ${note}\n`);
+    }
   }
 
-  // ── Phase 2: group departments by head email ────────────────────────────
+  // ── Phase 2: group departments-with-something-to-send by head email ─────
   const byEmail = new Map();
   const noEmail = [];
 
-  for (const [dept, data] of deptData) {
-    const email = (DEPT_HEADS[dept] ?? DEPT_HEADS[dept.trim()]) ?? null;
+  for (const [dept, monthsData] of deptToSend) {
+    const email = TEST_EMAIL_OVERRIDE ?? ((DEPT_HEADS[dept] ?? DEPT_HEADS[dept.trim()]) ?? null);
     if (!email) {
       console.log(`⚠️  "${dept}": ไม่มีอีเมลหัวหน้า — ข้ามการส่ง`);
       noEmail.push(dept);
       continue;
     }
     if (!byEmail.has(email)) byEmail.set(email, []);
-    byEmail.get(email).push({ dept, ...data });
+    byEmail.get(email).push({ dept, monthsData });
   }
 
   // ── Phase 3: send one email per unique address ──────────────────────────
   const summaryRows = [];
-  const monthRangeLabel = monthRangeShortLabel(months);
 
   for (const [email, deptList] of byEmail) {
     const deptNames = deptList.map(d => d.dept).join(", ");
+    const monthKeysInBatch = [...new Set(deptList.flatMap(d => d.monthsData.map(m => m.key)))];
+    const monthLabel = monthRangeShortLabel(monthKeysInBatch);
+
     console.log(`\n📧  ${maskEmail(email)}`);
     console.log(`    กลุ่มงาน: ${deptNames}`);
+    console.log(`    เดือนที่รายงาน: ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}`);
 
-    // Build combined HTML email
+    const introText = `ระบบตรวจสอบและยืนยันว่าการส่งคะแนน P4P ของเดือน ` +
+      `${monthKeysInBatch.map(tableKeyToDisplay).join(", ")} เสร็จสมบูรณ์ครบถ้วนแล้ว ` +
+      `กดชื่อแพทย์เพื่อเปิดไฟล์ Excel บน Google Drive`;
+
     const html = buildScoreReportEmail({
-      depts: deptList.map(d => ({
-        dept        : d.dept,
-        monthsSummary: d.monthsData.map(({ displayName, status }) => ({ displayName, status })),
-      })),
+      depts: deptList.map(d => ({ dept: d.dept, monthsSummary: d.monthsData })),
       reportDate: todayStr,
+      intro: introText,
     });
 
-    const subject   = `รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthRangeLabel}`;
-    const plainBody = `รายงานคะแนน P4P\nกลุ่มงาน: ${deptNames}`;
+    const subjectPrefix = TEST_EMAIL_OVERRIDE ? "[TEST] " : "";
+    const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthLabel} (ครบถ้วน)`;
+    const plainBody = `รายงานคะแนน P4P — เดือน ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}\nกลุ่มงาน: ${deptNames}`;
 
     await gmail.sendMessage({ to: email, subject, body: plainBody, html });
     console.log(`    ✉️  ส่งแล้ว`);
 
-    for (const { dept } of deptList) {
-      await logEmailSent(sb, reportMonthKey, dept);
-      summaryRows.push({ dept, emailed: true, note: "ส่งแล้ว" });
+    for (const { dept, monthsData } of deptList) {
+      if (!TEST_EMAIL_OVERRIDE) {
+        for (const { key } of monthsData) {
+          await logEmailSent(sb, key, dept);
+        }
+      }
+      summaryRows.push({ dept, emailed: true, note: `ส่งแล้ว (${monthsData.map(m => m.displayName).join(", ")})${TEST_EMAIL_OVERRIDE ? " [TEST]" : ""}` });
     }
   }
 
@@ -279,19 +389,18 @@ async function main() {
     summaryRows.push({ dept, emailed: false, note: "ไม่มีอีเมลหัวหน้า" });
   }
 
-  for (const dept of skippedDepts) {
-    summaryRows.push({ dept, emailed: false, note: `ส่งแล้วก่อนหน้านี้ (${tableKeyToDisplay(reportMonthKey)})` });
+  for (const [dept, note] of blockedNote) {
+    summaryRows.push({ dept, emailed: false, note });
   }
 
-  writeSummary(summaryRows, months, todayStr);
+  writeSummary(summaryRows, monthsAsc, todayStr);
 }
 
 // ── Step summary helper ────────────────────────────────────────────────────
-function writeSummary(rows, months, todayStr) {
-  const monthLabels = months.map(tableKeyToDisplay).join(" · ");
+function writeSummary(rows, monthsAsc, todayStr) {
   let md = `# 📈 P4P Score Tracker\n\n`;
   md += `**วันที่:** ${todayStr}  \n`;
-  md += `**เดือนที่ตรวจสอบ:** ${monthLabels}\n\n`;
+  md += `**ช่วงที่ตรวจสอบ:** ${tableKeyToDisplay(monthsAsc[0])} – ${tableKeyToDisplay(monthsAsc[monthsAsc.length - 1])}\n\n`;
 
   if (!rows.length) {
     md += "_ไม่พบกลุ่มงานในช่วงนี้_\n";
@@ -310,7 +419,10 @@ function writeSummary(rows, months, todayStr) {
   else       { console.log("\n" + md); }
 }
 
-main().catch(err => {
-  console.error("\n❌ Fatal:", err.message);
-  process.exit(1);
-});
+// Only run when invoked directly (so tests can import selectMonthsToSend etc.)
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(err => {
+    console.error("\n❌ Fatal:", err.message);
+    process.exit(1);
+  });
+}
