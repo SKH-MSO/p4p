@@ -32,6 +32,17 @@ jobs:
       - name: Install Python dependencies
         run: pip install openpyxl
 
+      - name: Preprocess Drive folders (trash older duplicates & unrelated files)
+        working-directory: process
+        env:
+          GOOGLE_CLIENT_ID:       ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:   ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN:   ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_ROOT_FOLDER_ID:  ${{ secrets.GOOGLE_ROOT_FOLDER_ID }}
+          SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:           ${{ secrets.SUPABASE_KEY }}
+        run: node preprocess-drive.js
+
       - name: Run process pipeline
         working-directory: process
         env:
