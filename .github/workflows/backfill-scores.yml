@@ -26,6 +26,9 @@ on:
           - '10'
           - '11'
           - '12'
+permissions:
+  contents: read
+
 jobs:
   backfill:
     name: Backfill ${{ inputs.year }} month ${{ inputs.month }}

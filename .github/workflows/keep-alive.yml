@@ -7,6 +7,9 @@ on:
   # Allows manual triggering from the GitHub Actions tab
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   keep-alive:
     runs-on: ubuntu-latest
@@ -17,5 +20,11 @@ jobs:
       - name: Send keep-alive request
         # Use curl to make a request to an API endpoint that queries your database
         # Replace the URL with one of your project's API endpoints
+        # SUPABASE_URL is passed via env: rather than interpolated directly
+        # into the run: string — direct ${{ secrets.* }} interpolation is
+        # GitHub's own documented anti-pattern (risk of the value leaking into
+        # `set -x`/debug output or shell history).
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         run: |
-          curl -I ${{ secrets.SUPABASE_URL }}
+          curl -I "$SUPABASE_URL"

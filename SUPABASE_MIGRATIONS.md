@@ -87,3 +87,24 @@ having `provision_month()` assert the `trg_secure_new_roster`-installed
 shape instead of re-deriving a competing one (see the file's own header
 comment). This ledger exists so the next schema change doesn't reintroduce
 the same class of drift.
+
+## Health check — catching this class of bug automatically
+
+This exact class of regression (a roster table ending up with an
+anon-visible policy alongside the authenticated-only one) is mechanically
+detectable — run this in the Supabase SQL Editor at any time, or wire it
+into a scheduled check, to confirm no roster table has drifted back to
+anon-open:
+
+```sql
+select tablename
+from pg_policies
+where schemaname = 'public'
+  and tablename ~ '^[0-9]{4}_[0-9]{2}$'
+  and 'anon' = any(roles);
+-- Expect ZERO rows. Any row returned here means that month's roster table
+-- is readable by the public anon key with no login — the exact bug fixed
+-- above. `provision_month()` itself now asserts this for the table it just
+-- created (see scripts/provision-month-function.sql step 7b), but this
+-- query checks every table, including ones provisioned before that fix.
+```

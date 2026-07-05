@@ -27,6 +27,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   provision:
     runs-on: ubuntu-latest

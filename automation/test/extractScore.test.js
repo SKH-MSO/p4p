@@ -96,3 +96,31 @@ test("integer score in BE-year range on a grand-total label row is not filtered"
   assert.equal(score, 2607);
   assert.match(method, /grand-total/);
 });
+
+test("a coincidental year value elsewhere in the grand-total row does not outrank the real (smaller) score", () => {
+  // Bug: the grand-total row's year-filter used to be disabled for the WHOLE
+  // row, not just the label cell. A stray "ปี 2568" note sharing the row with
+  // the real (smaller) total let Math.max pick the year instead of the score.
+  const rows = [
+    { col_1: "item A", col_5: 400 },
+    { col_1: "item B", col_5: 320 },
+    { col_1: "รวมแต้มทั้งหมด", col_3: 2568, col_5: 720 },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 720);
+  assert.match(method, /grand-total/);
+});
+
+test("whole-sheet fallback still finds a score when every number looks year-like", () => {
+  // Bug: isYearLike unconditionally excludes 2400–2699, so a sheet with no
+  // recognised label row and only year-range numbers had nothing left for
+  // "largest in sheet" — it fell all the way to "no candidates found"
+  // instead of recovering via the (score-preferring) year-like fallback.
+  const rows = [
+    { col_1: "item A", col_5: 2450 },
+    { col_1: "item B", col_5: 2500 },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 2500);
+  assert.match(method, /year-like fallback/);
+});

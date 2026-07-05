@@ -53,3 +53,18 @@ test("email date fallback is not used when a text year is present", () => {
 test("email date fallback ignored when unparseable", () => {
   assert.equal(resolveBeYear("", "", "", "not-a-date"), null);
 });
+
+// ── Tier 3/4 boundary (bug: regexes didn't match their own doc comments —
+// tier 3 said "43–99" but matched 40–99, tier 4 said "00–42" but matched
+// 00–39, so a bare 40/41/42 resolved via the wrong tier) ────────────────────
+test("boundary: 43 resolves as short BE (tier 3), not short CE", () => {
+  assert.equal(resolveBeYear("report.xlsx", "43", ""), 2543);
+});
+
+test("boundary: 42 resolves as short CE (tier 4), not short BE", () => {
+  assert.equal(resolveBeYear("report.xlsx", "42", ""), 2585);
+});
+
+test("boundary: 40 resolves as short CE (tier 4)", () => {
+  assert.equal(resolveBeYear("report.xlsx", "40", ""), 2583);
+});

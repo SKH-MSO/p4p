@@ -18,6 +18,9 @@ on:
   # always runs immediately, bypassing the last-day-of-month check above.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   update-month-picker:
     name: Regenerate month-picker rich menu

@@ -10,6 +10,9 @@ on:
       - "automation/**"
       - ".github/workflows/automation-tests.yml"
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
