@@ -229,6 +229,45 @@ export async function saveSenderMatch({
 }
 
 /**
+ * Record one successful live submission against sender_physician_match.
+ * Unlike saveSenderMatch() (used by the historical batch scan, which sets an
+ * absolute email_count from a full mailbox re-scan), this increments the
+ * existing count by 1 — called once per successfully-processed email from
+ * the live pipeline, so the count reflects submissions-seen-so-far rather
+ * than a re-derived total.
+ */
+export async function bumpSenderMatch({
+  senderEmail, senderDisplayName, extractedName, matchedPhysician, department, similarity,
+}) {
+  const supabase = getSupabase();
+  const { data: existing, error: readError } = await supabase
+    .from("sender_physician_match")
+    .select("email_count")
+    .eq("sender_email", senderEmail)
+    .maybeSingle();
+  if (readError) throw new Error(`sender_physician_match read error: ${readError.message}`);
+
+  const { error } = await supabase
+    .from("sender_physician_match")
+    .upsert(
+      {
+        sender_email        : senderEmail,
+        sender_display_name : senderDisplayName || null,
+        email_count         : (existing?.email_count ?? 0) + 1,
+        extracted_name      : extractedName || null,
+        name_source         : "live_pipeline",
+        matched_physician   : matchedPhysician || null,
+        department          : department || null,
+        similarity          : Number(similarity),
+        matched             : true,
+        updated_at          : new Date().toISOString(),
+      },
+      { onConflict: "sender_email" }
+    );
+  if (error) throw new Error(`sender_physician_match upsert error: ${error.message}`);
+}
+
+/**
  * Update the score column for a specific row identified by its primary key.
  *
  * @param {string}        date          Table name, e.g. "2569_02"

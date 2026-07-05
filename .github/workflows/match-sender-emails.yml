@@ -1,6 +1,10 @@
 name: Match Sender Emails
 
 on:
+  # Manual only. Live submissions now update sender_physician_match directly
+  # (automation/index.js, right after a score is saved) — this workflow is
+  # just a backfill tool for historical mail that predates that change, or
+  # for repairing/re-deriving matches after a manual fix.
   workflow_dispatch:
 
 permissions:
