@@ -27,9 +27,9 @@ export default [
     },
   },
 
-  // Browser helper served to the LIFF pages.
+  // Browser helper served to the LIFF pages, plus the admin dashboard's client JS.
   {
-    files: ["assets/**/*.js"],
+    files: ["assets/**/*.js", "admin/**/*.js"],
     languageOptions: {
       sourceType: "script",
       ecmaVersion: "latest",
