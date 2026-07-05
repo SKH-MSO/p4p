@@ -122,12 +122,35 @@
             if (err.details) parts.push("details: " + err.details)
             if (err.hint) parts.push("hint: " + err.hint)
             if (err.code) parts.push("code: " + err.code)
+            // Dump every OTHER own-enumerable property too — the fixed
+            // message/details/hint/code list above covers Supabase/PostgREST
+            // errors, but a LIFF SDK error may carry additional fields (e.g.
+            // a more specific sub-reason) that this was silently dropping,
+            // which is exactly the information needed to pin down why
+            // liff.init() rejects a same-page-endpoint LIFF id.
+            const known = new Set(["message", "details", "hint", "code"])
+            for (const key of Object.keys(err)) {
+                if (known.has(key)) continue
+                try {
+                    const val = typeof err[key] === "object" ? JSON.stringify(err[key]) : String(err[key])
+                    parts.push(`${key}: ${val}`)
+                } catch { /* unstringifiable — skip */ }
+            }
             return parts.length ? parts.join(" | ") : String(err)
         }
 
         async function attemptLineBind(accessToken) {
             const inited = await liffReady
-            if (!inited) throw new Error("liff.init failed: " + describeError(liffInitError))
+            if (!inited) {
+                // Surface exactly what was attempted, not just the error —
+                // the previous "Invalid LIFF ID" report gave no way to
+                // confirm the id/URL actually in play at failure time.
+                throw new Error(
+                    "liff.init failed: " + describeError(liffInitError) +
+                    ` | liffId used: ${LIFF_ID}` +
+                    ` | page URL: ${location.href}`
+                )
+            }
             if (!liff.isLoggedIn()) throw new Error("liff.isLoggedIn() returned false")
 
             let profile
