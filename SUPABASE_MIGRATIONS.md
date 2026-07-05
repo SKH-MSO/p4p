@@ -22,7 +22,12 @@ already-applied file is safe.
    table + RLS.
 4. `automation/sql/bump_sender_match.sql` — atomic increment RPC for
    `sender_physician_match.email_count` (used by the live pipeline).
-5. `scripts/security-rls-auth.sql` — **the current RLS model**: locks every
+5. `automation/sql/management_stipends.sql` — `management_stipends` table +
+   RLS + seed data. Replaces `process/process.js`'s previously-hardcoded
+   `MANAGEMENT_DATA`/`DEPT_HEAD_SET` (real physician names + compensation
+   figures baked into source). Read by `process/process.js`'s
+   `loadManagementStipends()`, once per run.
+6. `scripts/security-rls-auth.sql` — **the current RLS model**: locks every
    monthly roster table (`YYYY_MM`) and `p4p_submissions` to
    `authenticated` + `is_current_user_allowlisted()`, revokes `anon`
    entirely, and installs the `trg_secure_new_roster` event trigger so any
@@ -31,35 +36,35 @@ already-applied file is safe.
    `blocked_emails`, and the allow-list functions
    (`is_sender_allowlisted`, `is_current_user_allowlisted`,
    `log_access_request`).
-6. `scripts/provision-month-function.sql` — `provision_month(p_new, p_old)`,
+7. `scripts/provision-month-function.sql` — `provision_month(p_new, p_old)`,
    the function `provision-next-month.mjs` calls every month to create the
-   next roster table. **Must be run AFTER step 5** — it relies on
+   next roster table. **Must be run AFTER step 6** — it relies on
    `trg_secure_new_roster` already existing to lock down the table it
    creates, and asserts (rather than re-derives) that the resulting grants
    are `authenticated`-only with zero `anon` policies. Running this before
-   step 5 would leave newly-created tables unprotected until step 5 is
+   step 6 would leave newly-created tables unprotected until step 6 is
    applied.
-7. `scripts/list-all-physicians.sql` — `list_all_physicians()` RPC (feeds
+8. `scripts/list-all-physicians.sql` — `list_all_physicians()` RPC (feeds
    the `/verify/` physician-name dropdown).
-8. `scripts/bind-line-user.sql` + `scripts/line-user-id-columns.sql` +
+9. `scripts/bind-line-user.sql` + `scripts/line-user-id-columns.sql` +
    `scripts/line-bind-gate.sql` — LINE userId binding
    (`bind_line_user_id`, `record_bind_failure`,
    `get_line_bind_gate_status`) and the `line_bind_attempts` table.
-9. `scripts/line-binding-status-view.sql` — admin view of binding status.
-10. `scripts/email-sent-log-setup.sql` — `email_sent_log` table + RLS
+10. `scripts/line-binding-status-view.sql` — admin view of binding status.
+11. `scripts/email-sent-log-setup.sql` — `email_sent_log` table + RLS
     (score-tracker dedup).
-11. `scripts/telegram-approve-buttons.sql` +
+12. `scripts/telegram-approve-buttons.sql` +
     `scripts/telegram-approve-sender-display-name.sql` — Telegram
     approve/reject buttons on the access-request alert.
-12. `scripts/notify-access-request.sql` and
+13. `scripts/notify-access-request.sql` and
     `scripts/auth-hook-restrict-signups.sql` — both explicitly marked
     "TEMPLATE — verify before enabling" in-file; review before running.
 
 ## Superseded — do NOT run
 
 - **`scripts/security-rls.sql`** — the original anon-open RLS model,
-  replaced by `scripts/security-rls-auth.sql` (step 5 above). Re-running it
-  after step 5 would silently reopen anonymous read access on every
+  replaced by `scripts/security-rls-auth.sql` (step 6 above). Re-running it
+  after step 6 would silently reopen anonymous read access on every
   roster/submissions table. Kept in the repo for history only; the file
   itself carries a large warning banner saying the same thing.
 - **`scripts/backfill-submitted-at.sql`** and
@@ -68,8 +73,8 @@ already-applied file is safe.
   transition. Not part of a fresh-project setup; only relevant if you're
   replaying that specific historical migration.
 - **`scripts/provision-month.sql`** — a thin manual wrapper that just calls
-  the `provision_month()` RPC from step 6 with an explicit month key
-  (for backfills). Not a separate migration; requires step 6 already
+  the `provision_month()` RPC from step 7 with an explicit month key
+  (for backfills). Not a separate migration; requires step 7 already
   applied.
 
 ## Known incident: the RLS gap

@@ -81,53 +81,35 @@ const DEPT_COLORS = {
 };
 // ─── Management allowance data ───────────────────────────────────
 // Key: firstname + " " + lastname (no prefix). Provides col M (staff) and col E + I (dept).
-const MANAGEMENT_DATA = [
-  { name: 'ศิริพันธ์ บุญโต',             remark: 'รองผู้อำนวยการ',      amount: 7000 },
-  { name: 'นิธินันท์ สร้อยอากาศ',         remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'อภิสรา กูลวงศ์ธนโรจน์',       remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'ศิรดา แสงไพบูลย์',            remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'ณัฏฐพัชร จันทร์หอม',          remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'ลักขณา จิราพงษ์',             remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'อรวรรณ อุตราวิสิทธิกุล',      remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'ดวงพร เกื้อกูลเกียรติ',        remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'พงศ์พจน์ ฉุยฉาย',             remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'ทรงพล โพธิ์สุวรรณ',           remark: 'ประธาน PCT มะเร็ง',   amount:  800 },
-  { name: 'ฉัตรดาว สุจริต',              remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'พิสิษฐ์ เลิศเชาวพัฒน์',       remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'วราวุธ เมธีศิริวัฒน์',         remark: 'รองผู้อำนวยการ',      amount: 7000 },
-  { name: 'ศุภศรัณย์ ศุภพัฒนพงศ์',        remark: 'รองผู้อำนวยการ',      amount: 7000 },
-  { name: 'ธิรัญฎา สุทธิพงศ์',            remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'ธญาภร ลิขิตธรรมากุล',          remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'นฤวัต เกสรสุคนธ์',            remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'พยุงศักดิ์ ศักดาภิพาณิชย์',   remark: 'ประธาน PCT ENT',     amount:  800 },
-  { name: 'อัญชลี ชุ่มแจ่ม',             remark: 'ผู้ช่วยผู้อำนวยการ',   amount: 3000 },
-  { name: 'สงกรานต์ ชุนหวัฒนา',          remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'โอภาส ไชยมหาพฤกษ์',           remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-  { name: 'เกษมศักดิ์ จึงจรูญ',           remark: 'หัวหน้ากลุ่มงาน',     amount: 1000 },
-];
+//
+// Sourced from the Supabase management_stipends table (see
+// automation/sql/management_stipends.sql), not hardcoded — this used to be
+// a literal array/set of real physicians' names, roles, and stipend
+// amounts committed straight into source. loadManagementStipends() below
+// populates these two module-level bindings once per run, before any
+// month is processed (see main()); everything else in this file
+// (getMgmt(), DEPT_HEAD_SET.has(...)) is unchanged.
+let MGMT_LOOKUP   = {};
+let DEPT_HEAD_SET = new Set();
 
-// O(1) lookup: "firstname lastname" → { remark, amount }
-const MGMT_LOOKUP = Object.fromEntries(
-  MANAGEMENT_DATA.map(d => [normaliseName(d.name), { remark: d.remark, amount: d.amount }])
-);
+/**
+ * Fetch management_stipends and populate MGMT_LOOKUP / DEPT_HEAD_SET.
+ * Call once per run (not once per month — this data isn't month-specific).
+ */
+async function loadManagementStipends(supabase) {
+  const { data, error } = await supabase
+    .from('management_stipends')
+    .select('physician_name, remark, amount, is_dept_head');
+  if (error) throw new Error(`management_stipends read error: ${error.message}`);
 
-// Dept-head physicians eligible for extra score of 1,320 in col I
-const DEPT_HEAD_SET = new Set([
-  'ฉัตรดาว สุจริต',
-  'ศิริพันธ์ บุญโต',
-  'อรวรรณ อุตราวิสิทธิกุล',
-  'นฤวัต เกสรสุคนธ์',
-  'ดวงพร เกื้อกูลเกียรติ',
-  'พิสิษฐ์ เลิศเชาวพัฒน์',
-  'นิธินันท์ สร้อยอากาศ',
-  'ธญาภร ลิขิตธรรมากุล',
-  'ธิรัญฎา สุทธิพงศ์',
-  'ศิรดา แสงไพบูลย์',
-  'อภิสรา กูลวงศ์ธนโรจน์',
-  'สงกรานต์ ชุนหวัฒนา',
-  'โอภาส ไชยมหาพฤกษ์',
-  'เกษมศักดิ์ จึงจรูญ',
-].map(normaliseName));
+  MGMT_LOOKUP = Object.fromEntries(
+    (data ?? []).map(d => [normaliseName(d.physician_name), { remark: d.remark, amount: d.amount }])
+  );
+  DEPT_HEAD_SET = new Set(
+    (data ?? []).filter(d => d.is_dept_head).map(d => normaliseName(d.physician_name))
+  );
+  log(`  [Mgmt] Loaded ${data?.length ?? 0} management_stipends row(s), ${DEPT_HEAD_SET.size} dept-head(s)`);
+}
 
 /** Return management entry for a person, or null */
 function getMgmt(person) {
@@ -961,7 +943,7 @@ async function buildDeptSheets(sheets, ssId, depTmplSheetId, allPersons, beYear,
 
     // Data rows: [count, "prefix firstname  lastname", "position+rank", type, mgmt_amount, 0, 0, " ", remark]
     // Note: double space before lastname — this is the key for rowNumMap lookup
-    // F and G are later overwritten by formulas; E stays as the direct MANAGEMENT_DATA amount.
+    // F and G are later overwritten by formulas; E stays as the direct management_stipends amount.
     const rows = persons.map((p, idx) => {
       const mgmt = getMgmt(p);
       return [
@@ -1000,7 +982,7 @@ async function buildDeptSheets(sheets, ssId, depTmplSheetId, allPersons, beYear,
         formulaData.push({ range: `'${dept}'!F${r}`, values: [[`='${internSheetName}'!N${rowNum}`]] });
         formulaData.push({ range: `'${dept}'!G${r}`, values: [[`=E${r}+F${r}`]] });
       } else {
-        // E: direct amount from MANAGEMENT_DATA (written in rows above); no formula override
+        // E: direct amount from management_stipends (written in rows above); no formula override
         formulaData.push({ range: `'${dept}'!F${r}`, values: [[`='${staffSheetName}'!N${rowNum}`]] });
         formulaData.push({ range: `'${dept}'!G${r}`, values: [[`=E${r}+F${r}`]] });
       }
@@ -1370,6 +1352,10 @@ async function main() {
   const sheets   = createSheetsClient();
   const supabase = createClient(CONFIG.supabase.url, CONFIG.supabase.key);
   const months   = getTargetMonths();
+
+  // Management stipend data is the same across every month in this run —
+  // fetch it once here rather than per month.
+  await loadManagementStipends(supabase);
 
   // Pre-flight: verify SK03 template has required sheets before processing any month
   log('[Pre-flight] Verifying SK03 template sheets…');
