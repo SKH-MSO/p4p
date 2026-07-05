@@ -1,6 +1,11 @@
 name: Match Sender Emails
 
 on:
+  schedule:
+    # Runs every day at 00:00 UTC (07:00 Bangkok time, UTC+7), so the
+    # sender_physician_match table used by the Telegram approve message
+    # stays fresh with recent submitters.
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 permissions:
