@@ -120,8 +120,11 @@
                 timeline.style.display = "none"
                 // The current month's table may not exist yet (created once the
                 // first submission/admin setup happens) — treat that as "no one
-                // has sent yet" instead of a generic error.
-                const tableMissing = /does not exist|undefined_table|42P01|schema cache/i.test(err?.message ?? "")
+                // has sent yet" instead of a generic error. Prefer the structured
+                // Postgres error code (stable) over matching PostgREST's message
+                // text (fragile — a wording change would silently break this).
+                const tableMissing = err?.code === "42P01" ||
+                    /does not exist|undefined_table|schema cache/i.test(err?.message ?? "")
                 if (tableMissing) {
                     emptyEl.querySelector(".es-title").textContent = "ยังไม่มีการส่ง"
                     emptyEl.querySelector(".es-sub").textContent   = "เดือนนี้ยังไม่มีแพทย์ส่งไฟล์ P4P"

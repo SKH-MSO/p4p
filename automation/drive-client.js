@@ -134,6 +134,29 @@ export function createDriveClient() {
       fields: "id, name, modifiedTime",
       supportsAllDrives: true,
     });
+
+    // The list-then-create above is a check-then-act race: two overlapping
+    // runs (e.g. a live email arriving mid-backfill) can both see "no
+    // existing file" and both create one, leaving two files with the same
+    // name. Re-check right after creating and clean up any duplicate that
+    // shows up — this can't close the race window entirely (Drive has no
+    // atomic create-if-absent), but it stops duplicates from persisting.
+    try {
+      const dupCheck = await drive.files.list({
+        q        : `name='${driveEscape(fileName)}' and '${folderId}' in parents and trashed=false`,
+        fields   : "files(id)",
+        pageSize : 10,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const dupes = (dupCheck.data.files ?? []).filter((f) => f.id !== res.data.id);
+      for (const d of dupes) {
+        await drive.files.delete({ fileId: d.id, supportsAllDrives: true });
+      }
+    } catch {
+      // Best-effort cleanup — never fail the upload over this.
+    }
+
     return { fileId: res.data.id, fileName, replaced: false };
   }
 
@@ -153,18 +176,27 @@ export function createDriveClient() {
       return new Map();
     }
 
-    const res = await drive.files.list({
-      q        : `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
-      fields   : "files(id, name)",
-      pageSize : 1000,
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
-
+    // Paginated — a single page (previously capped at pageSize:1000 with no
+    // pageToken loop) silently truncated the result for any month folder
+    // exceeding 1000 files, which callers (score-tracker's Drive-link lookup,
+    // check-month.mjs) would then under-report with no indication anything
+    // was cut off.
     const map = new Map();
-    for (const f of res.data.files ?? []) {
-      map.set(f.name, f.id);
-    }
+    let pageToken;
+    do {
+      const res = await drive.files.list({
+        q        : `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
+        fields   : "nextPageToken, files(id, name)",
+        pageSize : 1000,
+        pageToken,
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      for (const f of res.data.files ?? []) {
+        map.set(f.name, f.id);
+      }
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
     return map;
   }
 

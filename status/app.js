@@ -7,7 +7,19 @@
         const XMARK_SVG = '<svg class="stat-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>'
 
         // ── URL params ────────────────────────────────────────────────────────
-        const queryString   = decodeURIComponent(window.location.search).replace("?liff.state=", "")
+        // LIFF often nests an already percent-encoded querystring inside
+        // liff.state (e.g. "?liff.state=%3Fsheetname%3D2569_07"). A stray "%"
+        // that isn't a valid escape sequence makes decodeURIComponent throw
+        // URIError — this runs at module top level, outside main()'s
+        // try/catch, so an uncaught throw here used to leave the page stuck
+        // on the loading skeleton forever with no visible error.
+        let queryString
+        try {
+            queryString = decodeURIComponent(window.location.search).replace("?liff.state=", "")
+        } catch (e) {
+            console.warn("Failed to decode location.search:", e)
+            queryString = window.location.search.replace("?liff.state=", "")
+        }
         const par_sheetname = new URLSearchParams(queryString).get("sheetname")
 
         // ── DOM refs ──────────────────────────────────────────────────────────
@@ -216,8 +228,7 @@
                     // null-safe join — avoids rendering "สมชาย null" when a name
                     // column is missing (matches ranking/list pages' pattern)
                     const fullname   = [row.firstname, row.lastname].filter(Boolean).join(" ")
-                    // ↓ adjust "department" to match your actual Supabase column name
-                    const department = row.department || row.dep || row.group || ""
+                    const department = row.department || ""
                     const isSent     = row.submitted_at != null
 
                     arr[i] = [fullname, fullname, department, isSent]

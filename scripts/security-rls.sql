@@ -1,4 +1,25 @@
 -- ============================================================================
+--  ⚠️  SUPERSEDED — DO NOT RUN — kept for history only.
+-- ============================================================================
+--  This migration's anon-read model (Block 1/2/3 below, `to anon using
+--  (true)`) was replaced by scripts/security-rls-auth.sql, which locks every
+--  roster/submissions table to `authenticated` + is_current_user_allowlisted()
+--  and revokes anon entirely. Re-running THIS file after security-rls-auth.sql
+--  would silently re-open anonymous read access on every table it touches,
+--  because its Block 3 event trigger and security-rls-auth.sql's Block 3
+--  event trigger both install under the same name (trg_secure_new_roster) —
+--  whichever ran LAST wins for all future CREATE TABLEs, and every existing
+--  table would additionally gain back an "anon read roster"/"anon read
+--  submissions" policy on top of the authenticated-only one (RLS policies are
+--  OR'd together, so anon access would return even with the authenticated
+--  policy still in place).
+--
+--  If you need the current RLS model, run scripts/security-rls-auth.sql
+--  instead. This file is retained only so the history of how the security
+--  posture evolved isn't lost.
+-- ============================================================================
+
+-- ============================================================================
 --  P4P — Supabase Row Level Security lockdown
 -- ============================================================================
 --  Context

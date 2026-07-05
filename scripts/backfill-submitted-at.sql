@@ -8,6 +8,13 @@
 --  the common case; rows the automation matched fuzzily (title/spacing quirks)
 --  may not match here — re-run the automation's own backfill for those, or
 --  spot-fix. Idempotent: only fills rows whose submitted_at is still NULL.
+--
+--  Grouped by physician_name (taking the EARLIEST submitted_at) before the
+--  join so this is deterministic even if p4p_submissions ever has more than
+--  one row for the same physician_name + work_month (e.g. historical data
+--  that predates the unique(physician_name, work_month) constraint added in
+--  automation/sql/p4p_submissions.sql) — a plain row-to-row join in that case
+--  could nondeterministically pick either matching row's timestamp.
 -- ============================================================================
 do $$
 declare t text;
@@ -20,9 +27,13 @@ begin
     execute format($f$
       update public.%1$I m
          set submitted_at = s.submitted_at
-        from public.p4p_submissions s
-       where s.work_month = %1$L
-         and m.submitted_at is null
+        from (
+          select physician_name, min(submitted_at) as submitted_at
+          from public.p4p_submissions
+          where work_month = %1$L
+          group by physician_name
+        ) s
+       where m.submitted_at is null
          and lower(btrim(m.firstname || ' ' || m.lastname))
            = lower(btrim(s.physician_name))
     $f$, t);

@@ -17,7 +17,7 @@ import { sendTelegram, formatResultMessage, formatErrorMessage } from "./telegra
 import { buildHtmlReply }               from "./templates/reply.js";
 import { buildHtmlErrorReply }          from "./templates/error-reply.js";
 import { checkEnv }                     from "./env-check.js";
-import { MAX_MESSAGES, SKIP_SENDERS, SEND_ERROR_REPLIES, THREAD_RELAY_SENDERS } from "./config.js";
+import { MAX_MESSAGES, SKIP_SENDERS, SEND_ERROR_REPLIES, THREAD_RELAY_SENDERS, MAX_ATTACHMENT_SIZE_BYTES } from "./config.js";
 import { MONTH_TOKENS_BY_NUM }          from "./months.js";
 import log                              from "./logger.js";
 import * as path                        from "path";
@@ -61,16 +61,6 @@ function formatSize(bytes) {
   if (bytes < 1024)    return `${bytes} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
-}
-
-/** Escape user-derived strings before inserting into HTML to prevent XSS. */
-function escapeHtml(s) {
-  return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 // ── Excel loading ─────────────────────────────────────────────────────────
@@ -467,9 +457,12 @@ async function sendAlertReply({ errorType = "other", safeFilename = "", detected
  */
 async function processBuffer(buffer, { subject = "", body = "", filename, replyTo = "", senderDisplayName = "", messageId = "", emailDate = null, threadId = null, gmail }) {
   /** Shorthand: fire an "other" alert reply for unexpected pipeline errors. */
+  // sendAlertReply -> buildHtmlErrorReply now escapes safeFilename/detectedDate/
+  // detectedName internally (single escaping point) — pass raw values below,
+  // not pre-escaped ones, to avoid double-escaping ("&" -> "&amp;amp;").
   const otherReply = () => sendAlertReply({
     errorType   : "other",
-    safeFilename: escapeHtml(filename ?? ""),
+    safeFilename: filename ?? "",
     replyTo, messageId, gmail,
   });
 
@@ -538,7 +531,7 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     console.error(`│        ❌  Claude analysis failed: ${err.message}`);
     await sendTelegram(formatErrorMessage(err.message, filename)).catch((e) => console.warn(`│        ⚠️  Telegram notify failed: ${e.message}`));
     if (/score is 0/i.test(err.message)) {
-      await sendAlertReply({ errorType: "zero_score", safeFilename: escapeHtml(filename ?? ""), replyTo, messageId, gmail });
+      await sendAlertReply({ errorType: "zero_score", safeFilename: filename ?? "", replyTo, messageId, gmail });
     } else {
       await otherReply();
     }
@@ -563,8 +556,8 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     }
     await sendAlertReply({
       errorType   : isTableMissing ? "wrong_date" : "other",
-      safeFilename: escapeHtml(filename ?? ""),
-      detectedDate: isTableMissing ? escapeHtml(analysis.date) : "",
+      safeFilename: filename ?? "",
+      detectedDate: isTableMissing ? analysis.date : "",
       replyTo, messageId, gmail,
     });
     await sendTelegram(
@@ -711,8 +704,8 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     if (!match) {
       await sendAlertReply({
         errorType   : "physician_not_found",
-        safeFilename: escapeHtml(filename ?? ""),
-        detectedName: escapeHtml(analysis.name ?? ""),
+        safeFilename: filename ?? "",
+        detectedName: analysis.name ?? "",
         replyTo, messageId, gmail,
       });
     } else {
@@ -728,13 +721,15 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
         : match.matchedName;
       const displayName    = `${prefix}${spacedName}`;
       const department     = match.department ?? "";
-      // Escape all user-derived values before HTML interpolation (XSS prevention)
-      const safeDisplayName = escapeHtml(displayName);
-      const safeDepartment  = escapeHtml(department);
-      const safeDisplayDate = escapeHtml(displayDate);
-      const safeScore       = escapeHtml(analysis.score.toFixed(2));
-
-      const htmlReply = buildHtmlReply({ displayName: safeDisplayName, safeDepartment, safeDisplayDate, safeScore });
+      // buildHtmlReply escapes every value itself before interpolating into
+      // HTML (defense-in-depth against XSS) — pass raw values here, not
+      // pre-escaped ones, or they'd be double-escaped ("&" -> "&amp;amp;").
+      const htmlReply = buildHtmlReply({
+        displayName,
+        safeDepartment : department,
+        safeDisplayDate: displayDate,
+        safeScore      : analysis.score.toFixed(2),
+      });
 
       console.log(`│        📧  Sending auto-reply to ${replyTo}…`);
       try {
@@ -772,6 +767,18 @@ async function processAttachment(att, messageId, context, gmail) {
 
   if (!excel) return false;
 
+  if (att.size > MAX_ATTACHMENT_SIZE_BYTES) {
+    console.warn(`│        ⚠️  Attachment exceeds ${formatSize(MAX_ATTACHMENT_SIZE_BYTES)} limit — skipping download.`);
+    await sendAlertReply({
+      errorType   : "other",
+      safeFilename: att.filename ?? "",
+      replyTo     : context.replyTo,
+      messageId,
+      gmail,
+    });
+    return "replied";
+  }
+
   let buffer;
   try {
     buffer = await gmail.downloadAttachment(messageId, att.attachmentId);
@@ -779,7 +786,7 @@ async function processAttachment(att, messageId, context, gmail) {
     console.error(`│        ❌  Download failed: ${err.message}`);
     await sendAlertReply({
       errorType   : "other",
-      safeFilename: escapeHtml(att.filename ?? ""),
+      safeFilename: att.filename ?? "",
       replyTo     : context.replyTo,
       messageId,
       gmail,
@@ -1001,8 +1008,8 @@ async function main() {
         alertSent = true;
       } else if (otherAtts.length > 0) {
         // Sender attached a file but in the wrong format (.xls, .ods, …)
-        const names = escapeHtml(otherAtts.map((a) => a.filename).join(", "));
-        console.log(`│  ⚠️   No xlsx found — wrong extension(s): ${otherAtts.map((a) => a.filename).join(", ")} → sending wrong_extension alert`);
+        const names = otherAtts.map((a) => a.filename).join(", ");
+        console.log(`│  ⚠️   No xlsx found — wrong extension(s): ${names} → sending wrong_extension alert`);
         await sendAlertReply({ errorType: "wrong_extension", safeFilename: names, replyTo: fromEmail, messageId: id, gmail });
         alertSent = true;
       } else {

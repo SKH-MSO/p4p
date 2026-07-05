@@ -18,19 +18,13 @@
 import { config as dotenvConfig } from "dotenv";
 import { createGmailClient }     from "../gmail-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
+import { todayThaiStr }          from "../bangkok-date.js";
 
 dotenvConfig({ override: true });
 
 const TEST_EMAIL = process.env.TEST_EMAIL ?? "sakhonmso@gmail.com";
-
-function todayThaiStr() {
-  const THAI_MONTHS = [
-    "มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
-    "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม",
-  ];
-  const d = new Date();
-  return `${d.getDate()} ${THAI_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
-}
+// todayThaiStr is Bangkok-safe (see automation/bangkok-date.js) — a raw
+// `new Date()` reads the host's local time, which is UTC in CI.
 
 async function main() {
   console.log(`\n${"═".repeat(60)}`);

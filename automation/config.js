@@ -26,6 +26,18 @@ export const SUPABASE_ROW_LIMIT = 1_000;
 export const TELEGRAM_TIMEOUT_MS = 10_000;
 
 /**
+ * Largest attachment (bytes) the pipeline will download and process.
+ * xlsx P4P scorecards are small (tens of KB); a genuine one should never get
+ * near this. Guards against a slow/huge download hanging the run (messages
+ * are processed sequentially) or spiking memory — Gmail's own attachment
+ * limit is 25MB, so this stays comfortably under that.
+ */
+const _maxAttSize = parseInt(process.env.MAX_ATTACHMENT_SIZE_BYTES ?? "", 10);
+export const MAX_ATTACHMENT_SIZE_BYTES = Number.isFinite(_maxAttSize) && _maxAttSize > 0
+  ? _maxAttSize
+  : 15 * 1024 * 1024; // 15 MB
+
+/**
  * Whether to send error/alert reply emails back to the original sender.
  * Set to false to suppress all alert replies (e.g. during testing).
  * Resume by setting back to true.

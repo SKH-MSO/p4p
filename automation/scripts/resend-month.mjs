@@ -28,6 +28,7 @@ import { createGmailClient }     from "../gmail-client.js";
 import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
 import { getDeptHeads }          from "../supabase-client.js";
+import { todayThaiStr }          from "../bangkok-date.js";
 
 dotenvConfig({ override: true });
 
@@ -45,11 +46,9 @@ function tableKeyToDisplay(key) {
   return `${THAI_MONTHS[month] ?? month} ${year}`;
 }
 
-function todayThaiStr() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${d.getDate()} ${THAI_MONTHS[m]} ${d.getFullYear() + 543}`;
-}
+// todayThaiStr is imported from ../bangkok-date.js (Bangkok-safe — a raw
+// `new Date()` reads the host's local time, UTC on GitHub Actions runners,
+// which can resolve to the wrong calendar day near the Bangkok boundary).
 
 // This can run on GitHub Actions in a PUBLIC repo — never print or persist a
 // full recipient address to console/$GITHUB_STEP_SUMMARY.

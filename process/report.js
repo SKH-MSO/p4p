@@ -26,6 +26,16 @@ const fs               = require('fs');
 const os               = require('os');
 const path             = require('path');
 
+/** Escape a value before interpolating it into the PNG-render HTML template. */
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  Config
 // ═══════════════════════════════════════════════════════════════════
@@ -356,9 +366,14 @@ async function uploadReport(drive, buffer) {
   const mime     = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const fileName = CONFIG.reportFileName;
   const folderId = CONFIG.reportFolderId;
+  // Escape single quotes before interpolating into the Drive query string
+  // (matches process.js's uploadFileToDrive) — the fixed config values here
+  // don't currently contain one, but the query syntax breaks silently if
+  // they ever do.
+  const safeName = fileName.replace(/'/g, "\\'");
 
   const existing = await driveListAll(drive, {
-    q: `'${folderId}' in parents and name='${fileName}' and trashed=false`,
+    q: `'${folderId}' in parents and name='${safeName}' and trashed=false`,
     fields: 'nextPageToken, files(id, name)',
     pageSize: 10,
   });
@@ -398,8 +413,8 @@ function buildHtml(group, runTime) {
     : group.rows.map((r, i) => `
         <tr class="${i % 2 === 1 ? 'alt' : ''}">
           <td class="num">${i + 1}</td>
-          <td class="name">${r.fullname}</td>
-          <td class="dept">${r.department}</td>
+          <td class="name">${escHtml(r.fullname)}</td>
+          <td class="dept">${escHtml(r.department)}</td>
         </tr>`).join('');
 
   const emptyMsg = '';
@@ -557,6 +572,8 @@ async function renderPng(html) {
 async function uploadPng(drive, buffer, fileName) {
   const mime     = 'image/png';
   const folderId = CONFIG.reportFolderId;
+  // See uploadReport() above for why this is escaped.
+  const safeName = fileName.replace(/'/g, "\\'");
 
   // Write to temp file — fs.createReadStream is more reliable than
   // Readable.from() for large binary uploads via googleapis
@@ -565,7 +582,7 @@ async function uploadPng(drive, buffer, fileName) {
 
   try {
     const existing = await driveListAll(drive, {
-      q: `'${folderId}' in parents and name='${fileName}' and trashed=false`,
+      q: `'${folderId}' in parents and name='${safeName}' and trashed=false`,
       fields: 'nextPageToken, files(id, name)',
       pageSize: 10,
     });

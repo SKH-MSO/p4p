@@ -53,7 +53,15 @@ export async function sendTelegram(text, { parseMode } = {}) {
       body    : JSON.stringify(body),
       signal  : controller.signal,
     });
-    const json = await res.json();
+    let json;
+    try {
+      json = await res.json();
+    } catch (parseErr) {
+      // A proxy/outage can return a non-JSON body (e.g. an HTML error page)
+      // on a 502/503 — without this, res.json() throws a raw SyntaxError
+      // instead of the descriptive error callers expect.
+      throw new Error(`Telegram API returned a non-JSON response (HTTP ${res.status}): ${parseErr.message}`);
+    }
     if (!json.ok) {
       throw new Error(`Telegram API error: ${json.description ?? JSON.stringify(json)}`);
     }

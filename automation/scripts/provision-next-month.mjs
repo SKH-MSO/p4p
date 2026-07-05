@@ -26,33 +26,14 @@
  */
 
 import { createClient } from "@supabase/supabase-js";
+import { bangkokYearMonth, monthKey } from "../bangkok-date.js";
 
 // ── Month-key math (Buddhist year = CE + 543) ───────────────────────────────
-
-/**
- * "Now" in Asia/Bangkok (UTC+7, no DST), independent of the host timezone.
- * GitHub runners are UTC, so 01:00 Bangkok on the 1st is 18:00 UTC on the last
- * day of the previous month — computing the calendar month from a UTC clock
- * would resolve to the wrong month. Mirrors the pattern in
- * scripts/update-month-picker.mjs.
- * @returns {{ ceYear: number, month: number }}  month is 1–12
- */
-export function bangkokYearMonth(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Bangkok",
-    year: "numeric",
-    month: "2-digit",
-  }).formatToParts(date);
-  return {
-    ceYear: Number(parts.find((p) => p.type === "year").value),
-    month: Number(parts.find((p) => p.type === "month").value),
-  };
-}
-
-/** Build a "BEYEAR_MM" key from a CE year + month (1–12). */
-export function monthKey(ceYear, month) {
-  return `${ceYear + 543}_${String(month).padStart(2, "0")}`;
-}
+// bangkokYearMonth/monthKey now live in automation/bangkok-date.js (shared
+// with score-tracker.mjs / resend-month.mjs / send-test-email.mjs) — re-
+// exported here so existing imports (e.g. test/computeMonthKeys.test.js)
+// keep working unchanged.
+export { bangkokYearMonth, monthKey };
 
 /**
  * Given the current CE year + month (1–12), return the key of that month (new)

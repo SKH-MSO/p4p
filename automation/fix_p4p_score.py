@@ -137,15 +137,48 @@ def nearest_number_near_cell(ws, anchor_row, anchor_col, score_col):
     return candidates[0] if candidates else None
 
 
-def get_score_data_range(ws, score_col, header_row, anchor_row):
+def is_subtotal_row(ws, row, score_col):
     """
-    Return (first_data_row, last_data_row) — all rows in score_col between
-    header_row+1 and anchor_row-1 that could hold numeric scores.
-    We set the range to header_row+1 .. anchor_row-1 and let SUM skip text.
+    True if this row looks like a per-department/sub-total row rather than a
+    single physician's data row — i.e. one of the first few columns contains a
+    TOTAL_KEYWORDS phrase. Sheets with subtotal rows between the header and
+    the grand-total anchor would otherwise have those subtotal values summed
+    directly INTO the grand-total SUM range alongside the individual data
+    rows they already summarize, double-counting them.
     """
-    first = header_row + 1
-    last = anchor_row - 1
-    return first, last
+    for c in range(1, min(score_col, 4)):
+        val = ws.cell(row, c).value
+        if isinstance(val, str) and any(kw in val for kw in TOTAL_KEYWORDS):
+            return True
+    return False
+
+
+def get_score_data_rows(ws, score_col, header_row, anchor_row):
+    """
+    Return the list of rows (header_row+1 .. anchor_row-1) that hold actual
+    per-physician data — subtotal rows (see is_subtotal_row) are excluded so
+    the caller's SUM formula doesn't double-count them.
+    """
+    return [
+        r for r in range(header_row + 1, anchor_row)
+        if not is_subtotal_row(ws, r, score_col)
+    ]
+
+
+def rows_to_ranges(rows):
+    """Collapse a sorted list of row numbers into contiguous (start, end) pairs."""
+    if not rows:
+        return []
+    ranges = []
+    start = prev = rows[0]
+    for r in rows[1:]:
+        if r == prev + 1:
+            prev = r
+        else:
+            ranges.append((start, prev))
+            start = prev = r
+    ranges.append((start, prev))
+    return ranges
 
 
 def unmerge_if_needed(ws, coordinate):
@@ -198,11 +231,16 @@ def fix_p4p_file(input_path, output_path=None):
         wb_do = openpyxl.load_workbook(input_path, data_only=True)
         ws_do = wb_do[sheet_name]
         current = nearest_number_near_cell(ws_do, anchor.row, anchor.column, score_col)
-        # Direct sum of data rows only (header and anchor rows excluded to avoid
-        # double-counting sub-totals or the grand-total formula itself)
+        # Data rows only — excludes header/anchor rows AND any per-department
+        # subtotal row in between (see is_subtotal_row), so a subtotal's own
+        # value is never added on top of the individual rows it already sums.
+        data_rows = get_score_data_rows(ws, score_col, header_row, anchor.row)
+        if not data_rows:
+            print("  [SKIP] No data rows found between header and total anchor (all rows filtered as subtotals?).")
+            continue
         direct_sum = sum(
             ws_do.cell(r, score_col).value
-            for r in range(header_row + 1, anchor.row)
+            for r in data_rows
             if isinstance(ws_do.cell(r, score_col).value, (int, float))
         )
         print(f"  Direct SUM of score column = {direct_sum}")
@@ -210,9 +248,13 @@ def fix_p4p_file(input_path, output_path=None):
             print(f"  Existing total near anchor : {current[1]}  (at {current[2]})")
 
         # ── Step 4: Determine data range ─────────────────────────────────────
-        first_row, last_row = get_score_data_range(
-            ws, score_col, header_row, anchor.row)
-        sum_range = f"{col_letter}{first_row}:{col_letter}{last_row}"
+        # Built as one or more contiguous ranges (skipping subtotal rows) so
+        # the generated formula sums exactly the same rows as direct_sum above.
+        ranges = rows_to_ranges(data_rows)
+        sum_range = ",".join(
+            f"{col_letter}{a}" if a == b else f"{col_letter}{a}:{col_letter}{b}"
+            for a, b in ranges
+        )
         sum_formula = f"=SUM({sum_range})"
         sum_cell_addr = f"{col_letter}{anchor.row}"
         print(f"  SUM range    : {sum_range}")
@@ -278,7 +320,14 @@ def fix_p4p_file(input_path, output_path=None):
         print("\n[WARNING] No sheets were fixed — check keyword coverage.")
         return False
 
-    wb.save(output_path)
+    try:
+        wb.save(output_path)
+    except PermissionError as e:
+        print(f"\n[ERROR] Could not save '{output_path}' — is it open in Excel? ({e})")
+        return False
+    except OSError as e:
+        print(f"\n[ERROR] Could not save '{output_path}': {e}")
+        return False
     print(f"\n{'='*60}")
     print(f"Saved → {output_path}")
     print(f"{'='*60}")

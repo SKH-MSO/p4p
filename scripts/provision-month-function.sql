@@ -25,12 +25,18 @@
 --    5. Copies the physician ROSTER only (prefix, firstname, lastname,
 --       department) — score / submitted_at stay NULL, since nobody has
 --       submitted for the new month yet.
---    6. Enables RLS, (re)creates the "anon read roster" SELECT policy, revokes
---       anon's blanket access, and grants anon SELECT on exactly the 4 columns
---       the LIFF pages read.
---    7. HARD-ASSERTS that anon ended up with all 4 column grants (the check
---       that a missing grant would otherwise fail silently as a browser 401),
---       and returns a human-readable summary string.
+--    6. The CREATE TABLE in step 3 already fired trg_secure_new_roster
+--       (security-rls-auth.sql), which enables RLS, creates the
+--       "verified read roster" policy (authenticated + is_current_user_
+--       allowlisted()), and grants `authenticated` SELECT on exactly the 4
+--       columns the LIFF pages read. This step re-asserts that shape rather
+--       than re-deriving it, so this function can never drift back to the
+--       older anon-open policy that security-rls-auth.sql retired.
+--    7. HARD-ASSERTS that `authenticated` ended up with all 4 column grants
+--       and that no anon-readable policy exists on the table (the check that
+--       a missing grant would otherwise fail silently as a browser 401, or a
+--       reintroduced anon policy would fail silently as a data leak), and
+--       returns a human-readable summary string.
 -- ============================================================================
 
 create or replace function public.provision_month(p_new text, p_old text)
@@ -76,29 +82,45 @@ begin
   );
   get diagnostics n_rows = row_count;
 
-  -- 6. RLS — same anon read-only shape as every other month table.
-  execute format('alter table public.%I enable row level security;', p_new);
+  -- 6. RLS — trg_secure_new_roster (security-rls-auth.sql) already fired
+  --    synchronously as part of the CREATE TABLE in step 3 and set up the
+  --    authenticated-only "verified read roster" policy + column grants.
+  --    Do NOT re-create an "anon read roster" policy here: RLS policies are
+  --    OR'd together, so doing so would silently reopen anonymous read access
+  --    on top of the authenticated-only policy on every new table — exactly
+  --    the regression this comment now guards against (this function used to
+  --    do that, from before security-rls-auth.sql retired anon access).
+  --    Re-assert the column safety net directly instead of re-deriving it:
   execute format('alter table public.%I add column if not exists submitted_at timestamptz;', p_new);
-  execute format('drop policy if exists "anon read roster" on public.%I;', p_new);
-  execute format('create policy "anon read roster" on public.%I for select to anon using (true);', p_new);
-  execute format('revoke all on public.%I from anon;', p_new);
-  execute format('grant select (firstname, lastname, department, submitted_at) on public.%I to anon;', p_new);
 
-  -- 7. Hard check — anon must have all 4 read columns, or the LIFF pages 401.
+  -- 7a. Hard check — `authenticated` must have all 4 read columns, or the
+  --     LIFF pages 401.
   select count(*) into n_cols
   from information_schema.column_privileges
-  where grantee = 'anon'
+  where grantee = 'authenticated'
     and table_schema = 'public'
     and table_name = p_new
     and column_name in ('firstname', 'lastname', 'department', 'submitted_at');
 
   if n_cols <> 4 then
     raise exception
-      'provision_month: anon read grant on public."%" is incomplete (% of 4 columns) — the LIFF pages would fail with 401',
+      'provision_month: authenticated read grant on public."%" is incomplete (% of 4 columns) — the LIFF pages would fail with 401. Is trg_secure_new_roster installed (security-rls-auth.sql)?',
       p_new, n_cols;
   end if;
 
-  return format('OK: provisioned public."%s" from public."%s" — %s roster rows, anon can read 4/4 columns.',
+  -- 7b. Hard check — anon must NOT have any policy on this table (RLS
+  --     policies are OR'd together, so an anon policy here would silently
+  --     leak every physician's roster row with no login at all).
+  if exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = p_new and 'anon' = any(roles)
+  ) then
+    raise exception
+      'provision_month: table public."%" has an anon-visible RLS policy — this must never happen post security-rls-auth.sql',
+      p_new;
+  end if;
+
+  return format('OK: provisioned public."%s" from public."%s" — %s roster rows, authenticated can read 4/4 columns, anon has zero access.',
                 p_new, p_old, n_rows);
 end;
 $$;

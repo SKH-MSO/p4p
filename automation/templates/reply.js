@@ -6,12 +6,31 @@
  * maintain and style without touching pipeline code.
  *
  * @param {object} data
- * @param {string} data.displayName   Full name with prefix, already HTML-escaped
- * @param {string} data.safeDepartment Department string, HTML-escaped (may be empty)
- * @param {string} data.safeDisplayDate "เดือน ปี" string, HTML-escaped
- * @param {string} data.safeScore      Formatted score string, HTML-escaped
+ * @param {string} data.displayName    Full name with prefix — pass RAW (unescaped); this function escapes it
+ * @param {string} data.safeDepartment Department string — pass RAW (may be empty)
+ * @param {string} data.safeDisplayDate "เดือน ปี" string — pass RAW
+ * @param {string} data.safeScore      Formatted score string — pass RAW
  */
+// This function is the single place these values are escaped before hitting
+// HTML — callers must pass raw values, not pre-escaped ones (escaping twice
+// would corrupt the output, e.g. "&" -> "&amp;amp;"). Escaping here instead
+// of trusting every caller closes off the HTML/script-injection vector these
+// values carry: displayName/department ultimately derive from physician
+// names extracted out of attacker-influenced email content.
+function escHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function buildHtmlReply({ displayName, safeDepartment, safeDisplayDate, safeScore }) {
+  displayName     = escHtml(displayName);
+  safeDepartment  = escHtml(safeDepartment);
+  safeDisplayDate = escHtml(safeDisplayDate);
+  safeScore       = escHtml(safeScore);
   return `<!DOCTYPE html>
 <html lang="th">
 <head>

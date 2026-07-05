@@ -34,6 +34,7 @@ import { createGmailClient }     from "../gmail-client.js";
 import { createDriveClient }     from "../drive-client.js";
 import { buildScoreReportEmail } from "../templates/score-report-email.js";
 import { getDeptHeads }          from "../supabase-client.js";
+import { bangkokNow, todayThaiStr } from "../bangkok-date.js";
 
 dotenvConfig({ override: true });
 
@@ -76,9 +77,12 @@ const THAI_MONTHS_SHORT = {
 
 /** Most-recent-first list of the `count` calendar months before this one. */
 function getPreviousMonths(count) {
-  const now = new Date();
-  let y = now.getFullYear();
-  let m = now.getMonth() + 1;
+  // Bangkok-safe: this workflow is cron'd for the 1st of the month, and a
+  // raw `new Date()` reads the GitHub Actions runner's UTC clock — right at
+  // the Bangkok midnight boundary that resolves to the wrong month.
+  const { ceYear, month } = bangkokNow();
+  let y = ceYear;
+  let m = month;
   const result = [];
   for (let i = 0; i < count; i++) {
     if (--m === 0) { m = 12; y--; }
@@ -109,11 +113,9 @@ function monthRangeShortLabel(monthKeys) {
     : `${oldLabel} ${oldYY} - ${newLabel} ${newYY}`;
 }
 
-function todayThaiStr() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${d.getDate()} ${THAI_MONTHS[m]} ${d.getFullYear() + 543}`;
-}
+// todayThaiStr is now imported from ../bangkok-date.js (Bangkok-safe; see
+// the comment on getPreviousMonths above for why raw `new Date()` is unsafe
+// here).
 
 // This workflow runs on GitHub Actions in a PUBLIC repo — never print or
 // persist a full recipient address to console/$GITHUB_STEP_SUMMARY, both of
@@ -227,14 +229,29 @@ async function getSentMonthsByDept(sb, monthKeys) {
   return map;
 }
 
+// Failures collected here are surfaced in the step summary AND fail the run
+// (see main()'s final check) — an email that sent successfully but whose
+// "sent" log write silently failed would otherwise go unnoticed until the
+// NEXT scheduled run resends the same report to the same department head.
+const logSentFailures = [];
+
 async function logEmailSent(sb, tableKey, department) {
-  const { error } = await sb
+  const upsertOnce = () => sb
     .from("email_sent_log")
     .upsert(
       { table_name: tableKey, department, sent_at: new Date().toISOString() },
       { onConflict: "table_name,department", ignoreDuplicates: true }
     );
-  if (error) console.warn(`⚠️  email_sent_log insert failed [${department}]: ${error.message}`);
+
+  let { error } = await upsertOnce();
+  if (error) {
+    console.warn(`⚠️  email_sent_log insert failed [${department}/${tableKey}], retrying once: ${error.message}`);
+    ({ error } = await upsertOnce());
+  }
+  if (error) {
+    console.error(`❌  email_sent_log insert failed twice [${department}/${tableKey}]: ${error.message} — the report WAS emailed, but this run will not remember that, risking a duplicate send next time.`);
+    logSentFailures.push({ tableKey, department, message: error.message });
+  }
 }
 
 
@@ -394,6 +411,17 @@ async function main() {
   }
 
   writeSummary(summaryRows, monthsAsc, todayStr);
+
+  if (logSentFailures.length > 0) {
+    // Fail the run loudly (non-zero exit → red in GitHub Actions) instead of
+    // letting a swallowed email_sent_log write pass as a green run — the
+    // report already went out, but without this the next scheduled run has
+    // no way to know that and will resend it.
+    throw new Error(
+      `${logSentFailures.length} email_sent_log write(s) failed after retry — ` +
+      logSentFailures.map(f => `${f.department}/${f.tableKey} (${f.message})`).join("; ")
+    );
+  }
 }
 
 // ── Step summary helper ────────────────────────────────────────────────────
@@ -409,6 +437,16 @@ function writeSummary(rows, monthsAsc, todayStr) {
     md += `|---|:---:|---|\n`;
     for (const r of rows) {
       md += `| ${r.dept} | ${r.emailed ? "✅" : "—"} | ${r.note} |\n`;
+    }
+  }
+
+  if (logSentFailures.length > 0) {
+    md += `\n## ⚠️ email_sent_log write failures\n\n`;
+    md += `These reports were emailed successfully, but recording that fact failed twice — `;
+    md += `they may be resent next run unless fixed manually:\n\n`;
+    md += `| Department | Month | Error |\n|---|---|---|\n`;
+    for (const f of logSentFailures) {
+      md += `| ${f.department} | ${f.tableKey} | ${f.message.replace(/\|/g, "╎")} |\n`;
     }
   }
 

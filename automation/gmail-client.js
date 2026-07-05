@@ -118,6 +118,16 @@ export function createGmailClient() {
   async function sendMessage({ to, subject, body, html, from, replyToMessageId, attachments = [] } = {}) {
     if (!to || !subject || (!body && !html)) throw new Error("`to`, `subject`, and `body` or `html` are required.");
 
+    // Strip CR/LF before these reach a raw header line. None of `to`,
+    // `subject`, or `from` should ever legitimately contain a newline; if one
+    // did (e.g. a crafted "From:" display name parsed out of a phishing-style
+    // email), leaving it in would let it inject extra MIME headers (e.g. a
+    // hidden Bcc:) into the raw message.
+    const stripCrlf = (s) => String(s ?? "").replace(/[\r\n]+/g, " ");
+    to      = stripCrlf(to);
+    subject = stripCrlf(subject);
+    from    = from ? stripCrlf(from) : from;
+
     // Encode non-ASCII header values per RFC 2047 (e.g. Thai text in subject)
     const encodeHeader = (str) =>
       /[^\x00-\x7F]/.test(str)
@@ -309,11 +319,15 @@ export function createGmailClient() {
    * @param {string} attachmentId
    */
   async function downloadAttachment(messageId, attachmentId) {
-    const res = await gmail.users.messages.attachments.get({
-      userId: "me",
-      messageId,
-      id: attachmentId,
-    });
+    // Explicit timeout — without one, a slow/stalled response to a large
+    // attachment can hang this call (and the whole run, since messages are
+    // processed sequentially) indefinitely. Callers should also check the
+    // attachment's advertised size before calling this (see MAX_MESSAGES /
+    // config.js) — this timeout is a backstop, not a size limit.
+    const res = await gmail.users.messages.attachments.get(
+      { userId: "me", messageId, id: attachmentId },
+      { timeout: 60_000 }
+    );
     // Gmail encodes attachment data as base64url (- and _ instead of + and /)
     const base64 = res.data.data.replace(/-/g, "+").replace(/_/g, "/");
     return Buffer.from(base64, "base64");

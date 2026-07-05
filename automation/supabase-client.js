@@ -235,36 +235,26 @@ export async function saveSenderMatch({
  * existing count by 1 — called once per successfully-processed email from
  * the live pipeline, so the count reflects submissions-seen-so-far rather
  * than a re-derived total.
+ *
+ * Delegates to the bump_sender_match RPC (automation/sql/bump_sender_match.sql)
+ * so the increment happens atomically in one INSERT ... ON CONFLICT statement.
+ * A JS-side read-then-upsert would race when attachments from the same email
+ * (or overlapping pipeline runs) call this concurrently for the same sender,
+ * silently losing increments.
  */
 export async function bumpSenderMatch({
   senderEmail, senderDisplayName, extractedName, matchedPhysician, department, similarity,
 }) {
   const supabase = getSupabase();
-  const { data: existing, error: readError } = await supabase
-    .from("sender_physician_match")
-    .select("email_count")
-    .eq("sender_email", senderEmail)
-    .maybeSingle();
-  if (readError) throw new Error(`sender_physician_match read error: ${readError.message}`);
-
-  const { error } = await supabase
-    .from("sender_physician_match")
-    .upsert(
-      {
-        sender_email        : senderEmail,
-        sender_display_name : senderDisplayName || null,
-        email_count         : (existing?.email_count ?? 0) + 1,
-        extracted_name      : extractedName || null,
-        name_source         : "live_pipeline",
-        matched_physician   : matchedPhysician || null,
-        department          : department || null,
-        similarity          : Number(similarity),
-        matched             : true,
-        updated_at          : new Date().toISOString(),
-      },
-      { onConflict: "sender_email" }
-    );
-  if (error) throw new Error(`sender_physician_match upsert error: ${error.message}`);
+  const { error } = await supabase.rpc("bump_sender_match", {
+    p_sender_email        : senderEmail,
+    p_sender_display_name : senderDisplayName || null,
+    p_extracted_name      : extractedName || null,
+    p_matched_physician   : matchedPhysician || null,
+    p_department          : department || null,
+    p_similarity          : Number(similarity),
+  });
+  if (error) throw new Error(`bump_sender_match RPC error: ${error.message}`);
 }
 
 /**
@@ -295,11 +285,18 @@ export async function saveScore(date, index, score, submittedAt) {
   if (submittedAt !== undefined) patch.submitted_at = submittedAt;
 
   const supabase = getSupabase();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(date)
     .update(patch)
-    .eq("index", index);
+    .eq("index", index)
+    .select("index");
 
   if (error) throw new Error(`Supabase update error on table "${date}": ${error.message}`);
+  // Supabase returns success with 0 affected rows when the filter matches
+  // nothing (stale match, wrong table) — without checking this, the caller
+  // believes the score was saved and reports success while nothing changed.
+  if (!data || data.length === 0) {
+    throw new Error(`Supabase update on table "${date}" matched no row for index ${index} — score was NOT saved`);
+  }
 }
 
