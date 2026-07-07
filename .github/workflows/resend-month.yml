@@ -1,0 +1,58 @@
+name: P4P Resend Month(s)
+
+# Manual one-off: report on specific past month(s) outside the normal
+# 3-month tracker window, regardless of completeness — see
+# automation/scripts/resend-month.mjs for why this exists.
+on:
+  workflow_dispatch:
+    inputs:
+      target_months:
+        description: "Month key(s) to resend, comma-separated (e.g. 2569_01,2569_02,2569_03)"
+        required: true
+        default: "2569_03"
+      test_dept:
+        description: "Restrict to this department only (comma-separated); blank = every department found"
+        required: false
+        default: ""
+      test_email:
+        description: "Send to this address instead of the real dept head(s); blank = send to real dept head(s)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  resend-month:
+    name: Resend ${{ inputs.target_months }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run resend
+        env:
+          GOOGLE_CLIENT_ID:     ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
+          TARGET_MONTHS:        ${{ inputs.target_months }}
+          TEST_DEPT:            ${{ inputs.test_dept }}
+          TEST_EMAIL:           ${{ inputs.test_email }}
+        run: node scripts/resend-month.mjs
