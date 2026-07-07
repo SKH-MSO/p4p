@@ -27,8 +27,7 @@ revoke all on public.dept_heads from anon, authenticated;
 grant select, insert, update, delete on public.dept_heads to service_role;
 
 -- Seed with the current mapping (built from the "head" Gmail label earlier
--- this session). เวชกรรมฟื้นฟู has no confirmed email yet — left null, which
--- both scripts already treat as "skip this department".
+-- this session).
 insert into dept_heads (department, head_email) values
   ('กุมารเวชกรรม', 'abunto@hotmail.com'),
   ('จักษุวิทยา', 'skch1136@gmail.com'),
@@ -39,7 +38,7 @@ insert into dept_heads (department, head_email) values
   ('พยาธิวิทยากายวิภาค', 'sirathird@gmail.com'),
   ('รังสีวิทยา', 'orawanxray@gmail.com'),
   ('วิสัญญีวิทยา', 'dkuakulkiat@gmail.com'),
-  ('เวชกรรมฟื้นฟู', null),
+  ('เวชกรรมฟื้นฟู', 'nat_kaning@yahoo.com'),
   ('เวชกรรมสังคม', 'suppasarun33@gmail.com'),
   ('เวชศาสตร์ฉุกเฉิน', 'alps209@gmail.com'),
   ('ศัลยกรรม', 'dr-kj@hotmail.com'),
