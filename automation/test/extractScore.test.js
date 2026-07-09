@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert   from "node:assert/strict";
-import { extractScoreFromRows } from "../claude-analyst.js";
+import { extractScoreFromRows, resolveScore } from "../claude-analyst.js";
 
 test("returns null for empty rows", () => {
   const { score } = extractScoreFromRows([]);
@@ -108,6 +108,37 @@ test("a coincidental year value elsewhere in the grand-total row does not outran
   ];
   const { score, method } = extractScoreFromRows(rows);
   assert.equal(score, 720);
+  assert.match(method, /grand-total/);
+});
+
+test("grand-total label with internal whitespace (merged cell) still matches", () => {
+  // Bug: real-world file had the merged label cell "รวมคะแนน ทั้งหมด" (with a
+  // space), which doesn't substring-match "รวมคะแนนทั้งหมด" in
+  // GRAND_TOTAL_LABELS. The row fell through to the sub-total pass, where the
+  // real total (2008) — landing in the 1900–2099 "year-like" range — was
+  // discarded, leaving a smaller sub-total (1320) as the answer instead.
+  const rows = [
+    { col_1: "รวมคะแนน บริหาร", col_3: 1320 },
+    { col_1: "รวมคะแนน หัตถการ", col_3: 505 },
+    { col_1: "รวมคะแนน ทั้งหมด", col_2: "รวมคะแนน ทั้งหมด", col_3: 2008 },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 2008);
+  assert.match(method, /grand-total/);
+});
+
+test("resolveScore doesn't mistake a year-like cached grand-total for an uncached formula", () => {
+  // Bug: resolveScore's grandRowEmpty check excluded year-like numbers too,
+  // so a real cached score of 2008 (in the 1900–2099 range) looked like an
+  // empty/uncached =SUM() cell. That triggered the Tier 1/2 fallback, which
+  // recomputed an unrelated (wrong) total from unrelated sub-total rows.
+  const rows = [
+    { col_1: "รวมคะแนน บริหาร", col_3: 1320 },
+    { col_1: "รวมคะแนน หัตถการ", col_3: 505 },
+    { col_1: "รวมคะแนน ทั้งหมด", col_2: "รวมคะแนน ทั้งหมด", col_3: 2008 },
+  ];
+  const { score, method } = resolveScore(rows);
+  assert.equal(score, 2008);
   assert.match(method, /grand-total/);
 });
 

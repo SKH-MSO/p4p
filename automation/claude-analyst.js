@@ -437,6 +437,12 @@ const SUBTOTAL_LABELS = [
 // Combined for weight×day fallback (avoid importing twice)
 const TOTAL_LABELS = [...GRAND_TOTAL_LABELS, ...SUBTOTAL_LABELS];
 
+// Merged label cells sometimes carry internal whitespace (e.g. a cell that
+// reads "รวมคะแนน ทั้งหมด" instead of "รวมคะแนนทั้งหมด"). Strip all whitespace
+// before comparing so label matching isn't sensitive to that formatting.
+const stripSpace = (s) => s.replace(/\s+/g, "");
+const includesLabel = (text, label) => stripSpace(text).includes(stripSpace(label));
+
 /** True if n looks like a calendar year and not a score. */
 function isYearLike(n) {
   if (n >= 1900 && n <= 2099) return true;
@@ -517,7 +523,7 @@ export function extractScoreFromRows(rows) {
   for (const row of rows) {
     const allValues = Object.values(row).map((v) => String(v ?? ""));
     const labelCells = allValues.filter((s) =>
-      GRAND_TOTAL_LABELS.some((label) => s.includes(label))
+      GRAND_TOTAL_LABELS.some((label) => includesLabel(s, label))
     );
     if (labelCells.length > 0) {
       // Prefer non-year-like candidates first: a confirmed grand-total row can
@@ -551,7 +557,7 @@ export function extractScoreFromRows(rows) {
     const firstThree = ["col_1", "col_2", "col_3"]
       .map((k) => String(row[k] ?? ""));
     const hasLabel = firstThree.some((s) =>
-      SUBTOTAL_LABELS.some((label) => s.includes(label))
+      SUBTOTAL_LABELS.some((label) => includesLabel(s, label))
     );
     if (hasLabel) {
       const nums = collectCandidates([row]);
@@ -592,7 +598,7 @@ export function extractScoreFromRows(rows) {
   let computedTotal = 0;
   for (const row of rows) {
     const isLabel = ["col_1", "col_2", "col_3"]
-      .some((k) => TOTAL_LABELS.some((label) => String(row[k] ?? "").includes(label)));
+      .some((k) => TOTAL_LABELS.some((label) => includesLabel(String(row[k] ?? ""), label)));
     if (isLabel) continue;
 
     const weightRaw = row["col_3"];
@@ -644,12 +650,17 @@ export function resolveScore(rows) {
   // Detect: grand-total label row present but contains no numbers
   const grandRowEmpty = rows.some((row) => {
     const allVals = Object.values(row).map((v) => String(v ?? ""));
-    const hasLabel = allVals.some((s) => GRAND_TOTAL_LABELS.some((lbl) => s.includes(lbl)));
+    const hasLabel = allVals.some((s) => GRAND_TOTAL_LABELS.some((lbl) => includesLabel(s, lbl)));
     if (!hasLabel) return false;
-    // Check for any positive non-year number in this row
+    // Check for any cached positive number in this row at all — including
+    // year-like ones. This is only asking "did the formula cell fail to cache
+    // a <v> value", not "is the value a plausible score" (extractScoreFromRows
+    // already handles that distinction correctly for the row it picks). A
+    // real score that happens to land in the year-like range (e.g. 2008) is
+    // still a cached value, so the row is not "empty".
     return !Object.values(row).some((val) => {
       const n = toNum(val);
-      return !isNaN(n) && n > 0 && !isYearLike(n);
+      return !isNaN(n) && n > 0;
     });
   });
 
@@ -657,10 +668,10 @@ export function resolveScore(rows) {
 
   const isSubtotalRow = (row) => {
     const firstThree = ["col_1", "col_2", "col_3"].map((k) => String(row[k] ?? ""));
-    return firstThree.some((s) => SUBTOTAL_LABELS.some((lbl) => s.includes(lbl)));
+    return firstThree.some((s) => SUBTOTAL_LABELS.some((lbl) => includesLabel(s, lbl)));
   };
   const isGrandTotalRow = (row) =>
-    Object.values(row).some((v) => GRAND_TOTAL_LABELS.some((lbl) => String(v ?? "").includes(lbl)));
+    Object.values(row).some((v) => GRAND_TOTAL_LABELS.some((lbl) => includesLabel(String(v ?? ""), lbl)));
 
   const rowNums = (row) =>
     Object.values(row).map(toNum).filter((n) => !isNaN(n) && n > 0 && !isYearLike(n));
