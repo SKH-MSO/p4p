@@ -140,6 +140,9 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
   table.physician-table tr:last-child td{border-bottom:none}
   .note-box{margin-top:20px;font-size:13px;color:#64748b;line-height:1.7;
     border-top:1px solid #dbeafe;padding-top:16px;font-style:italic}
+  .highlight-note{background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #f59e0b;
+    border-radius:8px;padding:12px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.6}
+  .highlight-note strong{color:#b45309}
   .footer{border-top:1px solid #dbeafe;padding:15px 32px;background:#f0f9ff;
     text-align:center;font-size:12px;color:#60a5fa}
 </style>
@@ -157,6 +160,10 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
     <p class="intro">
       ${introText}
     </p>
+
+    <div class="highlight-note">
+      <strong>หมายเหตุ:</strong> คะแนนในตารางเรียงจากมากไปน้อย (สูงสุดอยู่บนสุด)
+    </div>
 
     ${deptSections}
 
