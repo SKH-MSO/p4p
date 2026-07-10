@@ -1,16 +1,26 @@
-name: "! create SK03 and merge files"
+name: "! create SK03/merge files and notify dept heads"
 
 on:
   schedule:
     # Runs every day at 00:00 UTC (07:00 Bangkok time, UTC+7)
     - cron: '0 0 * * *'
   workflow_dispatch: # allow manual trigger from GitHub UI
+    inputs:
+      test_dept:
+        description: "score-tracker job only: restrict to this department (comma-separated); blank = normal run over all departments"
+        required: false
+        default: ""
+      test_email:
+        description: "score-tracker job only: send to this address instead of the real dept head, and skip marking months as sent; blank = normal run"
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   process:
+    name: Create SK03 + merge files
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -65,3 +75,48 @@ jobs:
           path: process/*.log
           if-no-files-found: ignore
           retention-days: 30
+
+  notify-dept-heads:
+    name: Check completion & notify dept heads
+    needs: process
+    # Notification is logically independent of merge/SK03 success — a
+    # pipeline hiccup on the `process` job shouldn't also silence the
+    # completion email heads are waiting on.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: automation
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: automation/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run score tracker
+        env:
+          # Gmail OAuth (shared with the process job)
+          GOOGLE_CLIENT_ID:     ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          # Supabase
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY:         ${{ secrets.SUPABASE_KEY }}
+          # Department -> head email comes from the Supabase dept_heads
+          # table (see automation/sql/dept_heads.sql), not a secret.
+          # Google Drive root folder ID for P4P files (used to resolve per-physician links)
+          P4P_FOLDER_ID:        ${{ secrets.P4P_FOLDER_ID }}
+          # Manual-run test overrides — blank on the scheduled run (see workflow_dispatch inputs above)
+          TEST_DEPT:            ${{ inputs.test_dept }}
+          TEST_EMAIL:           ${{ inputs.test_email }}
+        run: node scripts/score-tracker.mjs
