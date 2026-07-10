@@ -101,8 +101,8 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
   // Header title
   const deptNames = escHtml(depts.map(d => d.dept).join(", "));
   const headerTitle = depts.length === 1
-    ? `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${escHtml(depts[0].dept)}`
-    : `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${deptNames}`;
+    ? `รายงานแต้มคะแนน P4P (รายคน)<br>กลุ่มงาน ${escHtml(depts[0].dept)}`
+    : `รายงานแต้มคะแนน P4P (รายคน)<br>กลุ่มงาน ${deptNames}`;
 
   return `<!DOCTYPE html>
 <html lang="th">
@@ -142,7 +142,7 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
     border-radius:8px;padding:12px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.6}
   .highlight-note strong{color:#b45309}
   .footer{border-top:1px solid #dbeafe;padding:15px 32px;background:#f0f9ff;
-    text-align:center;font-size:12px;color:#60a5fa}
+    text-align:center;font-size:14px;color:#60a5fa}
 </style>
 </head>
 <body>
