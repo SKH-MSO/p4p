@@ -8,12 +8,16 @@
  * Step 5  — Merge individual Excel files → one workbook per person sheet
  * Step 6  — Create SK03 Google Spreadsheet via Sheets API (mirrors GAS doPost)
  *
- * Runs a single time per invocation, for the latest complete month only
- * (newest month in the window that passes Step 4) — no catch-up over older
- * months. Completion is recorded in the sk03_run_log Supabase table
- * (mirrors automation/scripts/score-tracker.mjs's email_sent_log pattern),
- * so a repeat trigger for the same month (the daily cron firing again, or a
- * manual workflow_dispatch) skips Steps 5/6 instead of regenerating them.
+ * Each run targets the latest 2 complete months (a fixed top-2 scan, not
+ * unbounded backlog-hunting): Phase A walks the window newest → oldest,
+ * skipping — not stopping at — incomplete months to keep looking older,
+ * until 2 complete months are found or the window is exhausted. Phase B
+ * processes each of those independently, so an already-run, null-scores,
+ * or merge-failure outcome on one never blocks the other. Completion is
+ * recorded per month in the sk03_run_log Supabase table (mirrors
+ * automation/scripts/score-tracker.mjs's email_sent_log pattern), so a
+ * repeat trigger (the daily cron firing again, or a manual
+ * workflow_dispatch) skips Steps 5/6 for a month already done.
  */
 
 require('dotenv').config();
@@ -1343,27 +1347,49 @@ function showDataflow() {
 const SK03_RUN_LOG_TABLE = 'sk03_run_log';
 
 async function hasSK03Run(supabase, monthKey) {
-  const { data, error } = await supabase
+  const readOnce = () => supabase
     .from(SK03_RUN_LOG_TABLE)
     .select('table_name')
     .eq('table_name', monthKey)
     .maybeSingle();
+
+  let { data, error } = await readOnce();
   if (error) {
-    log(`  [RunLog] ⚠ read failed for ${monthKey}: ${error.message} — proceeding as not-yet-run`, 'warn');
+    log(`  [RunLog] ⚠ read failed for ${monthKey}, retrying once: ${error.message}`, 'warn');
+    ({ data, error } = await readOnce());
+  }
+  if (error) {
+    log(`  [RunLog] ⚠ read failed twice for ${monthKey}: ${error.message} — proceeding as not-yet-run`, 'warn');
     return false;
   }
   return data !== null;
 }
 
-async function logSK03Run(supabase, monthKey, { mergedFileId, sk03SpreadsheetId }) {
-  const { error } = await supabase
+/**
+ * Upsert a completed month into sk03_run_log. Retries once, then pushes
+ * onto runLogFailures on a second failure — the merge + SK03 spreadsheet
+ * WERE created successfully, but without this row a repeat trigger has no
+ * way to know that and will regenerate them. main() throws at the end if
+ * runLogFailures is non-empty, so a lost write turns the job red instead
+ * of silently causing tomorrow's run to redo the work (mirrors
+ * automation/scripts/score-tracker.mjs's logEmailSent/logSentFailures).
+ */
+async function logSK03Run(supabase, monthKey, { mergedFileId, sk03SpreadsheetId }, runLogFailures) {
+  const upsertOnce = () => supabase
     .from(SK03_RUN_LOG_TABLE)
     .upsert(
       { table_name: monthKey, run_at: new Date().toISOString(), merged_file_id: mergedFileId, sk03_spreadsheet_id: sk03SpreadsheetId },
       { onConflict: 'table_name' }
     );
+
+  let { error } = await upsertOnce();
   if (error) {
-    log(`  [RunLog] ⚠ write failed for ${monthKey}: ${error.message} — a repeat trigger may regenerate this month`, 'warn');
+    log(`  [RunLog] ⚠ write failed for ${monthKey}, retrying once: ${error.message}`, 'warn');
+    ({ error } = await upsertOnce());
+  }
+  if (error) {
+    log(`  [RunLog] ✗ write failed twice for ${monthKey}: ${error.message} — merge+SK03 WERE created, but a repeat trigger may regenerate them`, 'warn');
+    runLogFailures.push({ key: monthKey, message: error.message });
   }
 }
 
@@ -1414,48 +1440,61 @@ async function main() {
   console.log(' P4P Excel Merge + SK03 Pipeline');
   console.log('══════════════════════════════════════════════════════');
   showDataflow();
-  console.log('Candidate window:', months.map(m => m.key).join(', '), '(processes only the latest complete, not-yet-run month)');
+  const TARGET_COMPLETE_MONTHS = 2;
+  console.log('Candidate window:', months.map(m => m.key).join(', '), `(targets the latest ${TARGET_COMPLETE_MONTHS} complete months)`);
   console.log('');
 
   const results = { processed: 0, skipped: 0, failed: [] };
+  const runLogFailures = [];
 
-  // Single-month run: walk newest → oldest and stop at the first month that
-  // passes Step 4 (Drive list matches Supabase — all physicians complete).
-  // That's "the latest complete month" for this run. No catch-up scanning
-  // of older months — sk03_run_log (checked below) is what makes it safe for
-  // the daily cron to keep hitting this same month without redoing work.
+  // ── Phase A — discovery ──────────────────────────────────────────
+  // Walk newest → oldest. Steps 2-4 already signal "not ready yet" by
+  // returning null/false for the expected cases (no Drive folder yet, no
+  // Supabase table yet, list mismatch) — continue past those to keep
+  // looking at older months. A genuine thrown error is NOT caught here:
+  // it propagates and fails the whole job, same as an unexpected error
+  // anywhere else in this script. Stop once TARGET_COMPLETE_MONTHS complete
+  // months are found, or the window is exhausted — this is a fixed top-N
+  // scan, not unbounded backlog-hunting past already-logged months.
+  console.log(`┌─ Discovery ${'─'.repeat(40)}`);
+  const completeMonths = [];
   for (const monthInfo of months) {
+    if (completeMonths.length >= TARGET_COMPLETE_MONTHS) break;
     const { key } = monthInfo;
+
+    log(`  [${key}] Step 2 — Google Drive…`);
+    const driveData = await getDriveMonthData(drive, monthInfo);
+    if (!driveData) { log(`  [${key}] → no Drive data — skipping`, 'warn'); continue; }
+    log(`  [${key}] → ${driveData.names.length} files`);
+
+    log(`  [${key}] Step 3 — Supabase…`);
+    const sbData = await getSupabaseMonthData(supabase, key);
+    if (!sbData) { log(`  [${key}] → no Supabase data — skipping`, 'warn'); continue; }
+    log(`  [${key}] → ${sbData.length} persons`);
+
+    log(`  [${key}] Step 4 — Comparing lists…`);
+    if (!listsMatch(driveData.names, sbData)) {
+      log(`  [${key}] → ✗ Lists do not match — skipping`, 'warn');
+      continue;
+    }
+    log(`  [${key}] → ✓ Complete`);
+    completeMonths.push({ key, monthInfo, driveData, sbData });
+  }
+  console.log(`└─ Found ${completeMonths.length} complete month(s): ${completeMonths.map(m => m.key).join(', ') || '(none)'}\n`);
+
+  // ── Phase B — processing ─────────────────────────────────────────
+  // Each discovered complete month is handled independently: an
+  // already-run, null-scores, or merge-failure outcome — or an error — on
+  // one must NOT block the other. Newest-first, so a timeout mid-run still
+  // lands the more time-sensitive month.
+  for (const { key, driveData, sbData } of completeMonths) {
     console.log(`\n┌─ ${key} ${'─'.repeat(46 - key.length)}`);
     try {
-      // Step 2
-      log('  [Step 2] Google Drive…');
-      const driveData = await getDriveMonthData(drive, monthInfo);
-      if (!driveData) { results.skipped++; console.log('└─ skipped\n'); continue; }
-      log(`  → ${driveData.names.length} files`);
-
-      // Step 3
-      log('  [Step 3] Supabase…');
-      const sbData = await getSupabaseMonthData(supabase, key);
-      if (!sbData) { results.skipped++; console.log('└─ skipped\n'); continue; }
-      log(`  → ${sbData.length} persons`);
-
-      // Step 4
-      log('  [Step 4] Comparing lists…');
-      if (!listsMatch(driveData.names, sbData)) {
-        log('  → ✗ Lists do not match — skipping', 'warn');
-        results.skipped++; console.log('└─ skipped\n'); continue;
-      }
-      log('  → ✓ Match');
-
-      // This is the latest complete month. If it's already been run (a
-      // prior cron fire, or an earlier run today), there's nothing new to
-      // do — stop here rather than falling through to older months.
       log('  [RunLog] Checking sk03_run_log…');
       if (await hasSK03Run(supabase, key)) {
-        log(`  → Already processed — nothing to do this run`);
-        console.log('└─ skipped (already run)\n');
-        break;
+        log(`  → Already processed — nothing to do for this month`);
+        results.skipped++; console.log('└─ skipped (already run)\n');
+        continue;
       }
       log('  → Not yet run');
 
@@ -1468,30 +1507,29 @@ async function main() {
       if (nullAfterFill.length > 0) {
         log(`  → ✗ ${nullAfterFill.length} person(s) still have no score after Step 4.5 — skipping merge & SK03`, 'warn');
         nullAfterFill.forEach(p => log(`    • ${p.fullname}`, 'warn'));
-        results.skipped++; console.log('└─ skipped (null scores)\n'); break;
+        results.skipped++; console.log('└─ skipped (null scores)\n'); continue;
       }
       log('  → ✓ All scores present');
 
       // Step 5
       log('  [Step 5] Merging…');
       const uploaded = await mergeAndUpload(drive, driveData.files, sbData, key);
-      if (!uploaded) { results.skipped++; console.log('└─ skipped\n'); break; }
+      if (!uploaded) { results.skipped++; console.log('└─ skipped\n'); continue; }
 
       // Step 6
       log('  [Step 6] Creating SK03 spreadsheet…');
       const sk03Id = await createSK03(drive, sheets, sbData, key, supabase);
 
       // Log so a repeat trigger for this same month skips Steps 5/6 above.
-      await logSK03Run(supabase, key, { mergedFileId: uploaded.id, sk03SpreadsheetId: sk03Id });
+      await logSK03Run(supabase, key, { mergedFileId: uploaded.id, sk03SpreadsheetId: sk03Id }, runLogFailures);
 
       results.processed++;
       console.log('└─ ✓ complete\n');
-      break; // single month per run — done
     } catch (err) {
       console.error(`  [ERROR] ${err.stack ?? err.message}`);
       results.failed.push({ key, error: err.message });
       console.log('└─ failed\n');
-      break; // the latest complete month failed — don't fall through to older months
+      // NOT a break/return — the other discovered complete month still runs.
     }
   }
 
@@ -1501,6 +1539,17 @@ async function main() {
   console.log(` ✗ Failed   : ${results.failed.length}`);
   results.failed.forEach(f => console.log(`     ${f.key}: ${f.error}`));
   console.log('');
+
+  if (runLogFailures.length > 0) {
+    // Fail the run loudly (non-zero exit → red in GitHub Actions) instead of
+    // letting a swallowed sk03_run_log write pass as a green run — the merge
+    // + SK03 spreadsheet were already created, but without this row a repeat
+    // trigger has no way to know that and will regenerate them.
+    throw new Error(
+      `${runLogFailures.length} sk03_run_log write(s) failed after retry — ` +
+      runLogFailures.map(f => `${f.key} (${f.message})`).join('; ')
+    );
+  }
 }
 
 main().catch(err => { console.error('\nFatal:', err.stack ?? err); process.exit(1); });

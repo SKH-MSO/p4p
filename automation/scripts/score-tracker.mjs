@@ -2,20 +2,23 @@
  * scripts/score-tracker.mjs
  *
  * Monthly P4P score-completion tracker.
- * Triggered on the 1st of every month by GitHub Actions.
+ * Runs as a job in .github/workflows/process-pipeline.yml, on that
+ * workflow's daily schedule (no schedule of its own).
  *
  * Logic:
  *  Phase 1 — Per-department latest-complete scan: walk a rolling window of
- *             months newest → oldest, and select only the latest consecutive
- *             complete unsent months (see selectMonthsToSend). A department
- *             gets emailed only when its newest months complete, reporting
- *             those specific months, never older gaps. This ensures email
- *             focuses on the latest progress, not catch-up backlog.
+ *             months newest → oldest, skipping (not stopping at) incomplete
+ *             or no-data months, to find the single latest complete month
+ *             for that department (see selectMonthToSend). If that month is
+ *             already logged in email_sent_log, there's nothing to send this
+ *             run — older complete-but-unsent months are never hunted down;
+ *             the latest complete month is always the definitive answer.
  *  Phase 2 — Group by head email: departments sharing the same head email are
  *             batched into ONE email (one email per person, not per department).
- *  Phase 3 — Send: one email per unique address, reporting only the month(s)
- *             newly selected in Phase 1. Never resend months already logged
- *             in email_sent_log (tracked per department per month).
+ *  Phase 3 — Send: one email per unique address, reporting the single month
+ *             selected per department in Phase 1. Never resend a month
+ *             already logged in email_sent_log (tracked per department per
+ *             month).
  *
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -40,19 +43,19 @@ dotenvConfig({ override: true });
 
 // ── Configuration ─────────────────────────────────────────────────────────
 const EXEMPT_DEPTS = new Set(["INTERN"]);
-// How far back to look for months a department hasn't been emailed for yet.
-// Wider than the old fixed 3-month display window so a department that falls
-// behind (submits weeks/months late) still gets caught up automatically.
+// How far back to search for a department's latest complete month. Wide
+// enough that a department with a long dry spell (no complete month in
+// months) still gets found once it does complete one — selectMonthToSend
+// skips incomplete/no-data months rather than stopping at the first one, so
+// widening this window is harmless (it only affects how far back the scan
+// gives up, not what gets sent — at most 1 month is ever selected).
 const CATCHUP_WINDOW_MONTHS = 12;
 // Never scan earlier than this month key, even if it's within the window
-// above. Months before this are out of scope for the automated catch-up —
-// pre-existing gaps back there (e.g. a month sitting at 0 submissions from
-// before the tracker's cutover) would otherwise permanently block every
-// later completed month from ever being reported (selectMonthsToSend always
-// stops at the first incomplete month it finds).
+// above — pre-existing history further back than this predates the
+// tracker's cutover and is out of scope.
 const CATCHUP_START_MONTH = "2569_04";
 
-// ── Test-mode overrides (manual workflow_dispatch only, see score-tracker.yml) ──
+// ── Test-mode overrides (manual workflow_dispatch only, see process-pipeline.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
 // address instead of the real dept head — lets you verify a real send
 // end-to-end without touching a real department head's inbox. When
@@ -121,30 +124,30 @@ function monthRangeShortLabel(monthKeys) {
 // ── Selection logic (pure — covered by test/scoreTrackerCatchup.test.js) ───
 
 /**
- * Given one department's window months ordered oldest → newest, pick the ones
- * that are ready to email this run: only the latest consecutive complete
- * unsent group. Walks backwards (newest first) until hitting an incomplete
- * or already-sent month — ensures email shows only the newest completed
- * month(s), not all older gaps. A month with no data (status === null — the
- * department wasn't tracked that month) is skipped without blocking.
+ * Given one department's window months ordered oldest → newest, find the
+ * single latest complete month and decide whether to send it this run.
+ * Walks backwards (newest first), skipping — not stopping at — incomplete
+ * or no-data (status === null) months, so a currently-in-progress newer
+ * month can never permanently block an older, already-complete one from
+ * ever being reported. Once the latest complete month is found, that's the
+ * definitive answer: if it's already sent, there is nothing to send this
+ * run — an older complete-but-unsent month is never hunted down instead.
  *
  * @param {Array<{ key: string, status: { complete: boolean }|null }>} monthsAsc
  * @param {Set<string>} alreadySentKeys  month keys already logged as sent for this dept
- * @returns {Array<{ key: string, status: object }>}  latest complete unsent months, newest → oldest
+ * @returns {Array<{ key: string, status: object }>}  the latest complete month, if unsent — 0 or 1 entries
  */
-export function selectMonthsToSend(monthsAsc, alreadySentKeys) {
+export function selectMonthToSend(monthsAsc, alreadySentKeys) {
   const monthsDesc = [...monthsAsc].reverse(); // newest first
-  const toSend = [];
 
   for (const { key, status } of monthsDesc) {
-    if (alreadySentKeys.has(key)) break;  // already sent → stop, don't reach older months
-    if (status === null) continue;         // no data → skip, don't block
-    if (!status.complete) break;           // incomplete → stop
-    toSend.push({ key, status });
+    if (status === null) continue;       // no data → keep scanning older months
+    if (!status.complete) continue;      // incomplete → keep scanning older months (was `break` — the bug)
+    // Latest complete month found — the definitive answer, don't look further back.
+    return alreadySentKeys.has(key) ? [] : [{ key, status }];
   }
 
-  // toSend is in newest→oldest order from walking backwards; return as-is for newest-first display
-  return toSend;
+  return []; // no complete month anywhere in the window
 }
 
 // createSB/getDeptStatus are now imported from ../dept-status.js.
@@ -256,8 +259,8 @@ async function main() {
   const sentByDept = await getSentMonthsByDept(sb, monthsAsc);
 
   // ── Phase 1: per-department catch-up scan ───────────────────────────────
-  // deptToSend: dept → [{ key, displayName, status }] (only newly-complete,
-  // not-yet-sent months — oldest → newest)
+  // deptToSend: dept → [{ key, displayName, status }] (0 or 1 entries — the
+  // department's single latest complete, not-yet-sent month, if any)
   const deptToSend = new Map();
   const blockedNote = new Map(); // dept → note for depts with nothing to send this run
 
@@ -277,23 +280,24 @@ async function main() {
       console.log(`│   ${tableKeyToDisplay(key)}: ${icon}${sentTag}`);
     }
 
-    const toSend = selectMonthsToSend(monthsWithStatus, alreadySent);
+    const toSend = selectMonthToSend(monthsWithStatus, alreadySent);
 
     if (toSend.length > 0) {
       console.log(`└─ พร้อมส่ง: ${toSend.map(m => tableKeyToDisplay(m.key)).join(", ")}\n`);
       deptToSend.set(dept, toSend.map(({ key, status }) => ({ key, displayName: tableKeyToDisplay(key), status })));
     } else {
-      // Explain why nothing's going out. selectMonthsToSend skips null-status
-      // (no data) months without blocking, so the real gap — if any — is the
-      // oldest unsent month that actually HAS data (mirrors its own logic;
-      // a plain "oldest unsent" would wrongly blame a no-data month instead).
-      const anyUnsent = monthsWithStatus.some(({ key }) => !alreadySent.has(key));
-      const oldestUnsentWithData = monthsWithStatus.find(({ key, status }) => !alreadySent.has(key) && status !== null);
-      const note = !anyUnsent
-        ? "ส่งครบแล้วทุกเดือนในช่วงที่ตรวจสอบ"
-        : !oldestUnsentWithData
-          ? "ไม่มีข้อมูลใหม่"
-          : `รอข้อมูลให้ครบ (${tableKeyToDisplay(oldestUnsentWithData.key)} ค้าง ${oldestUnsentWithData.status.missing}/${oldestUnsentWithData.status.total})`;
+      // Explain why nothing's going out. selectMonthToSend never stops at an
+      // incomplete month anymore, so there are only two possible reasons:
+      // no complete month exists anywhere in the window, or the latest
+      // complete month was already sent. (A third outcome — latest complete
+      // month found AND unsent — would mean toSend wasn't empty, so it can't
+      // reach here; log loudly if it ever does, since that'd indicate a bug.)
+      const latestComplete = [...monthsWithStatus].reverse().find(({ status }) => status?.complete);
+      const note = !latestComplete
+        ? "ยังไม่มีเดือนใดครบถ้วนในช่วงที่ตรวจสอบ"
+        : alreadySent.has(latestComplete.key)
+          ? `เดือนล่าสุดที่ครบถ้วน (${tableKeyToDisplay(latestComplete.key)}) ส่งไปแล้ว`
+          : "⚠ unexpected: latest complete month is unsent but was not selected — check selectMonthToSend";
       blockedNote.set(dept, note);
       console.log(`└─ ไม่มีเดือนใหม่ที่พร้อมส่ง — ${note}\n`);
     }
@@ -408,7 +412,7 @@ function writeSummary(rows, monthsAsc, todayStr) {
   else       { console.log("\n" + md); }
 }
 
-// Only run when invoked directly (so tests can import selectMonthsToSend etc.)
+// Only run when invoked directly (so tests can import selectMonthToSend etc.)
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(err => {
     console.error("\n❌ Fatal:", err.message);
