@@ -10,9 +10,10 @@
  *   assets/cards/<version>/*.png
  *   assets/cards/feature-carousel.<version>.flex.json
  *
- * A release exports either:
+ * A release exports one of:
  *   - `features` (+ a cover.png)  → multi-bubble cover+features carousel (v1)
- *   - `bubble`                    → a single pre-built bubble, sent standalone (v2)
+ *   - `bubble`                    → a single pre-built bubble, sent standalone
+ *   - `bubbles`                   → a pre-built array of bubbles, sent as a carousel (v2)
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs'
@@ -25,7 +26,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const LATEST  = 'v1'
 const version = process.argv[2] ?? LATEST
 const release = await import(`./releases/${version}.mjs`)
-const { RELEASE, BASE_URL, ALT_TEXT, svgs, features, bubble } = release
+const { RELEASE, BASE_URL, ALT_TEXT, svgs, features, bubble, bubbles } = release
 
 const OUT = join(__dirname, `../assets/cards/${RELEASE}`)
 mkdirSync(OUT, { recursive: true })
@@ -64,10 +65,12 @@ const featureBubble = ({ img, title, bullets }) => ({
   },
 })
 
-// A release exports either `features` (a multi-bubble cover+features carousel,
-// see v1) or `bubble` (a single pre-built bubble object, see v2). Only one
-// applies per release.
-const message = bubble
+// A release exports exactly one of `features` (multi-bubble cover+features
+// carousel, see v1), `bubbles` (pre-built array, sent as a carousel, see v2),
+// or `bubble` (a single pre-built bubble, sent standalone).
+const message = bubbles
+  ? { type: 'flex', altText: ALT_TEXT, contents: { type: 'carousel', contents: bubbles } }
+  : bubble
   ? { type: 'flex', altText: ALT_TEXT, contents: bubble }
   : {
       type: 'flex',

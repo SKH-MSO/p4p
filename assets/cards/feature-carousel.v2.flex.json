@@ -2,146 +2,162 @@
   "type": "flex",
   "altText": "อัปเดตใหม่ — ยืนยันตัวตนด้วยอีเมลและ LINE เพื่อความปลอดภัยและความเป็นส่วนตัว",
   "contents": {
-    "type": "bubble",
-    "size": "mega",
-    "hero": {
-      "type": "image",
-      "url": "https://skh-mso-p4p.vercel.app/assets/cards/v2/identity.png",
-      "size": "full",
-      "aspectRatio": "20:13",
-      "aspectMode": "cover"
-    },
-    "body": {
-      "type": "box",
-      "layout": "vertical",
-      "paddingAll": "20px",
-      "backgroundColor": "#FFFFFF",
-      "contents": [
-        {
-          "type": "text",
-          "text": "ฟีเจอร์ใหม่",
-          "size": "xs",
-          "weight": "bold",
-          "color": "#0B3FA6"
+    "type": "carousel",
+    "contents": [
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://skh-mso-p4p.vercel.app/assets/cards/v2/front.png",
+          "size": "full",
+          "aspectRatio": "3:4",
+          "aspectMode": "cover"
+        }
+      },
+      {
+        "type": "bubble",
+        "size": "mega",
+        "hero": {
+          "type": "image",
+          "url": "https://skh-mso-p4p.vercel.app/assets/cards/v2/identity.png",
+          "size": "full",
+          "aspectRatio": "20:13",
+          "aspectMode": "cover"
         },
-        {
-          "type": "text",
-          "text": "ยืนยันตัวตนก่อนเข้าใช้งาน",
-          "size": "lg",
-          "weight": "bold",
-          "color": "#1F2937",
-          "margin": "sm",
-          "wrap": true
-        },
-        {
+        "body": {
           "type": "box",
           "layout": "vertical",
-          "contents": [],
-          "width": "34px",
-          "height": "3px",
-          "backgroundColor": "#2D6CDF",
-          "cornerRadius": "2px",
-          "margin": "md"
-        },
-        {
-          "type": "box",
-          "layout": "baseline",
-          "spacing": "sm",
-          "margin": "md",
+          "paddingAll": "20px",
+          "backgroundColor": "#FFFFFF",
           "contents": [
             {
               "type": "text",
-              "text": "•",
-              "size": "sm",
-              "color": "#2D6CDF",
+              "text": "ฟีเจอร์ใหม่",
+              "size": "xs",
               "weight": "bold",
-              "flex": 0
+              "color": "#0B3FA6"
             },
             {
               "type": "text",
-              "text": "ยืนยันตัวตนด้วยอีเมล พร้อมรหัส OTP 6 หลัก",
-              "size": "sm",
-              "color": "#555555",
-              "wrap": true,
-              "flex": 1
+              "text": "ยืนยันตัวตนก่อนเข้าใช้งาน",
+              "size": "lg",
+              "weight": "bold",
+              "color": "#1F2937",
+              "margin": "sm",
+              "wrap": true
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [],
+              "width": "34px",
+              "height": "3px",
+              "backgroundColor": "#2D6CDF",
+              "cornerRadius": "2px",
+              "margin": "md"
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#2D6CDF",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "ยืนยันตัวตนด้วยอีเมล พร้อมรหัส OTP 6 หลัก",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#2D6CDF",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "ผูกบัญชี LINE อัตโนมัติ เข้าใช้งานได้ทันทีในครั้งถัดไป",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
+            },
+            {
+              "type": "box",
+              "layout": "baseline",
+              "spacing": "sm",
+              "margin": "md",
+              "contents": [
+                {
+                  "type": "text",
+                  "text": "•",
+                  "size": "sm",
+                  "color": "#2D6CDF",
+                  "weight": "bold",
+                  "flex": 0
+                },
+                {
+                  "type": "text",
+                  "text": "การยืนยันตัวตนช่วยเพิ่มความปลอดภัย และปกป้องความเป็นส่วนตัวของข้อมูลท่าน",
+                  "size": "sm",
+                  "color": "#555555",
+                  "wrap": true,
+                  "flex": 1
+                }
+              ]
             }
           ]
         },
-        {
+        "footer": {
           "type": "box",
-          "layout": "baseline",
-          "spacing": "sm",
-          "margin": "md",
+          "layout": "vertical",
+          "paddingAll": "16px",
+          "paddingTop": "0px",
+          "backgroundColor": "#FFFFFF",
           "contents": [
             {
-              "type": "text",
-              "text": "•",
-              "size": "sm",
+              "type": "button",
+              "style": "primary",
               "color": "#2D6CDF",
-              "weight": "bold",
-              "flex": 0
-            },
-            {
-              "type": "text",
-              "text": "ผูกบัญชี LINE อัตโนมัติ เข้าใช้งานได้ทันทีในครั้งถัดไป",
-              "size": "sm",
-              "color": "#555555",
-              "wrap": true,
-              "flex": 1
+              "height": "sm",
+              "action": {
+                "type": "uri",
+                "label": "ยืนยันตัวตนตอนนี้",
+                "uri": "https://liff.line.me/2008561527-AShTrJz0"
+              }
             }
           ]
         },
-        {
-          "type": "box",
-          "layout": "baseline",
-          "spacing": "sm",
-          "margin": "md",
-          "contents": [
-            {
-              "type": "text",
-              "text": "•",
-              "size": "sm",
-              "color": "#2D6CDF",
-              "weight": "bold",
-              "flex": 0
-            },
-            {
-              "type": "text",
-              "text": "การยืนยันตัวตนช่วยเพิ่มความปลอดภัย และปกป้องความเป็นส่วนตัวของข้อมูลท่าน",
-              "size": "sm",
-              "color": "#555555",
-              "wrap": true,
-              "flex": 1
-            }
-          ]
-        }
-      ]
-    },
-    "footer": {
-      "type": "box",
-      "layout": "vertical",
-      "paddingAll": "16px",
-      "paddingTop": "0px",
-      "backgroundColor": "#FFFFFF",
-      "contents": [
-        {
-          "type": "button",
-          "style": "primary",
-          "color": "#2D6CDF",
-          "height": "sm",
-          "action": {
-            "type": "uri",
-            "label": "ยืนยันตัวตนตอนนี้",
-            "uri": "https://liff.line.me/2008561527-AShTrJz0"
+        "styles": {
+          "footer": {
+            "separator": true,
+            "separatorColor": "#EAF2FF"
           }
         }
-      ]
-    },
-    "styles": {
-      "footer": {
-        "separator": true,
-        "separatorColor": "#EAF2FF"
       }
-    }
+    ]
   }
 }
