@@ -6,16 +6,18 @@
  * workflow's daily schedule (no schedule of its own).
  *
  * Logic:
- *  Phase 1 — Per-department latest-complete scan: walk a rolling window of
- *             months newest → oldest, skipping (not stopping at) incomplete
- *             or no-data months, to find the single latest complete month
- *             for that department (see selectMonthToSend). If that month is
- *             already logged in email_sent_log, there's nothing to send this
- *             run — older complete-but-unsent months are never hunted down;
- *             the latest complete month is always the definitive answer.
+ *  Phase 1 — Per-department catch-up scan: walk a rolling window of months
+ *             newest → oldest, skipping (not stopping at) incomplete or
+ *             no-data months while searching for where a complete run
+ *             starts (see selectMonthsToSend) — an in-progress newer month
+ *             must never permanently block an older, already-complete one
+ *             from being reported. Once a complete+unsent month is found,
+ *             collect it and any further consecutive complete+unsent months
+ *             behind it, up to MAX_MONTHS_PER_EMAIL, stopping at the first
+ *             incomplete/no-data/already-sent gap.
  *  Phase 2 — Group by head email: departments sharing the same head email are
  *             batched into ONE email (one email per person, not per department).
- *  Phase 3 — Send: one email per unique address, reporting the single month
+ *  Phase 3 — Send: one email per unique address, reporting the month(s)
  *             selected per department in Phase 1. Never resend a month
  *             already logged in email_sent_log (tracked per department per
  *             month).
@@ -43,17 +45,22 @@ dotenvConfig({ override: true });
 
 // ── Configuration ─────────────────────────────────────────────────────────
 const EXEMPT_DEPTS = new Set(["INTERN"]);
-// How far back to search for a department's latest complete month. Wide
-// enough that a department with a long dry spell (no complete month in
-// months) still gets found once it does complete one — selectMonthToSend
-// skips incomplete/no-data months rather than stopping at the first one, so
-// widening this window is harmless (it only affects how far back the scan
-// gives up, not what gets sent — at most 1 month is ever selected).
+// How far back to search for where a department's complete-unsent run
+// starts. Wide enough that a department with a long dry spell still gets
+// found once it does complete a month — selectMonthsToSend skips
+// incomplete/no-data months while searching rather than stopping at the
+// first one, so widening this window is harmless on its own (the batch
+// itself is separately bounded by MAX_MONTHS_PER_EMAIL below).
 const CATCHUP_WINDOW_MONTHS = 12;
 // Never scan earlier than this month key, even if it's within the window
 // above — pre-existing history further back than this predates the
 // tracker's cutover and is out of scope.
 const CATCHUP_START_MONTH = "2569_04";
+// Cap on how many consecutive complete-unsent months get bundled into a
+// single email — keeps a large backlog (e.g. after an outage, or a manual
+// email_sent_log reset) from producing one enormous email; the remainder
+// gets picked up on the next run since only the sent months get logged.
+const MAX_MONTHS_PER_EMAIL = 6;
 
 // ── Test-mode overrides (manual workflow_dispatch only, see process-pipeline.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
@@ -125,29 +132,43 @@ function monthRangeShortLabel(monthKeys) {
 
 /**
  * Given one department's window months ordered oldest → newest, find the
- * single latest complete month and decide whether to send it this run.
- * Walks backwards (newest first), skipping — not stopping at — incomplete
- * or no-data (status === null) months, so a currently-in-progress newer
- * month can never permanently block an older, already-complete one from
- * ever being reported. Once the latest complete month is found, that's the
- * definitive answer: if it's already sent, there is nothing to send this
- * run — an older complete-but-unsent month is never hunted down instead.
+ * consecutive run of complete, unsent months to email this run.
+ *
+ * Two-phase walk, backwards (newest first):
+ *  1. Searching — skip past incomplete, no-data, and already-sent months
+ *     without stopping, until the first complete+unsent month is found.
+ *     This is the key fix: an in-progress newer month (or a month already
+ *     sent) must never permanently block an older, already-complete one
+ *     from ever being reported.
+ *  2. Collecting — once found, keep including consecutive complete+unsent
+ *     months behind it, stopping at the first incomplete, no-data, or
+ *     already-sent month (a genuine gap ends the run — it doesn't get
+ *     skipped over), or once maxBatch entries have been collected.
  *
  * @param {Array<{ key: string, status: { complete: boolean }|null }>} monthsAsc
  * @param {Set<string>} alreadySentKeys  month keys already logged as sent for this dept
- * @returns {Array<{ key: string, status: object }>}  the latest complete month, if unsent — 0 or 1 entries
+ * @param {number} [maxBatch]  cap on how many months one run will select
+ * @returns {Array<{ key: string, status: object }>}  months to send, newest → oldest
  */
-export function selectMonthToSend(monthsAsc, alreadySentKeys) {
+export function selectMonthsToSend(monthsAsc, alreadySentKeys, maxBatch = MAX_MONTHS_PER_EMAIL) {
   const monthsDesc = [...monthsAsc].reverse(); // newest first
+  const toSend = [];
 
   for (const { key, status } of monthsDesc) {
-    if (status === null) continue;       // no data → keep scanning older months
-    if (!status.complete) continue;      // incomplete → keep scanning older months (was `break` — the bug)
-    // Latest complete month found — the definitive answer, don't look further back.
-    return alreadySentKeys.has(key) ? [] : [{ key, status }];
+    const eligible = status !== null && status.complete && !alreadySentKeys.has(key);
+
+    if (toSend.length === 0) {
+      if (!eligible) continue; // still searching — skip gaps, keep looking older
+      toSend.push({ key, status });
+      continue;
+    }
+
+    if (!eligible) break;      // already collecting — a gap ends the run here
+    toSend.push({ key, status });
+    if (toSend.length >= maxBatch) break;
   }
 
-  return []; // no complete month anywhere in the window
+  return toSend; // newest → oldest
 }
 
 // createSB/getDeptStatus are now imported from ../dept-status.js.
@@ -259,8 +280,8 @@ async function main() {
   const sentByDept = await getSentMonthsByDept(sb, monthsAsc);
 
   // ── Phase 1: per-department catch-up scan ───────────────────────────────
-  // deptToSend: dept → [{ key, displayName, status }] (0 or 1 entries — the
-  // department's single latest complete, not-yet-sent month, if any)
+  // deptToSend: dept → [{ key, displayName, status }] (0..MAX_MONTHS_PER_EMAIL
+  // entries — the department's consecutive complete, not-yet-sent months)
   const deptToSend = new Map();
   const blockedNote = new Map(); // dept → note for depts with nothing to send this run
 
@@ -280,24 +301,26 @@ async function main() {
       console.log(`│   ${tableKeyToDisplay(key)}: ${icon}${sentTag}`);
     }
 
-    const toSend = selectMonthToSend(monthsWithStatus, alreadySent);
+    const toSend = selectMonthsToSend(monthsWithStatus, alreadySent);
 
     if (toSend.length > 0) {
       console.log(`└─ พร้อมส่ง: ${toSend.map(m => tableKeyToDisplay(m.key)).join(", ")}\n`);
       deptToSend.set(dept, toSend.map(({ key, status }) => ({ key, displayName: tableKeyToDisplay(key), status })));
     } else {
-      // Explain why nothing's going out. selectMonthToSend never stops at an
-      // incomplete month anymore, so there are only two possible reasons:
-      // no complete month exists anywhere in the window, or the latest
-      // complete month was already sent. (A third outcome — latest complete
-      // month found AND unsent — would mean toSend wasn't empty, so it can't
-      // reach here; log loudly if it ever does, since that'd indicate a bug.)
-      const latestComplete = [...monthsWithStatus].reverse().find(({ status }) => status?.complete);
-      const note = !latestComplete
+      // Explain why nothing's going out. selectMonthsToSend never stops
+      // searching at an incomplete/already-sent month anymore, so there are
+      // only two possible reasons: no complete month exists anywhere in the
+      // window, or every complete month found was already sent. (A third
+      // outcome — some complete+unsent month existing but not selected —
+      // would mean toSend wasn't empty, so it can't reach here; log loudly
+      // if it ever does, since that'd indicate a bug.)
+      const anyComplete       = monthsWithStatus.some(({ status }) => status?.complete);
+      const anyUnsentComplete = monthsWithStatus.some(({ key, status }) => status?.complete && !alreadySent.has(key));
+      const note = !anyComplete
         ? "ยังไม่มีเดือนใดครบถ้วนในช่วงที่ตรวจสอบ"
-        : alreadySent.has(latestComplete.key)
-          ? `เดือนล่าสุดที่ครบถ้วน (${tableKeyToDisplay(latestComplete.key)}) ส่งไปแล้ว`
-          : "⚠ unexpected: latest complete month is unsent but was not selected — check selectMonthToSend";
+        : !anyUnsentComplete
+          ? "ส่งครบแล้วทุกเดือนที่ครบถ้วนในช่วงที่ตรวจสอบ"
+          : "⚠ unexpected: a complete+unsent month exists but was not selected — check selectMonthsToSend";
       blockedNote.set(dept, note);
       console.log(`└─ ไม่มีเดือนใหม่ที่พร้อมส่ง — ${note}\n`);
     }
@@ -412,7 +435,7 @@ function writeSummary(rows, monthsAsc, todayStr) {
   else       { console.log("\n" + md); }
 }
 
-// Only run when invoked directly (so tests can import selectMonthToSend etc.)
+// Only run when invoked directly (so tests can import selectMonthsToSend etc.)
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(err => {
     console.error("\n❌ Fatal:", err.message);
