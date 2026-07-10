@@ -101,8 +101,8 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
   // Header title
   const deptNames = escHtml(depts.map(d => d.dept).join(", "));
   const headerTitle = depts.length === 1
-    ? `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${escHtml(depts[0].dept)}`
-    : `รายงานสถานะคะแนน P4P<br>กลุ่มงาน ${deptNames}`;
+    ? `รายงานแต้มคะแนน P4P (รายคน)<br>กลุ่มงาน ${escHtml(depts[0].dept)}`
+    : `รายงานแต้มคะแนน P4P (รายคน)<br>กลุ่มงาน ${deptNames}`;
 
   return `<!DOCTYPE html>
 <html lang="th">
@@ -138,13 +138,11 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
   table.physician-table td{padding:9px 10px;font-size:15px;vertical-align:middle;
     border-bottom:1px solid #eff6ff}
   table.physician-table tr:last-child td{border-bottom:none}
-  .note-box{margin-top:20px;font-size:13px;color:#64748b;line-height:1.7;
-    border-top:1px solid #dbeafe;padding-top:16px;font-style:italic}
   .highlight-note{background:#fffbeb;border:1px solid #fde68a;border-left:4px solid #f59e0b;
     border-radius:8px;padding:12px 16px;margin-bottom:22px;font-size:14px;color:#92400e;line-height:1.6}
   .highlight-note strong{color:#b45309}
   .footer{border-top:1px solid #dbeafe;padding:15px 32px;background:#f0f9ff;
-    text-align:center;font-size:12px;color:#60a5fa}
+    text-align:center;font-size:14px;color:#60a5fa}
 </style>
 </head>
 <body>
@@ -166,14 +164,9 @@ export function buildScoreReportEmail({ depts, reportDate, intro }) {
     </div>
 
     ${deptSections}
-
-    <div class="note-box">
-      <strong style="color:#1d4ed8;font-style:normal">หมายเหตุ</strong>
-      อีเมลนี้ส่งอัตโนมัติทุกวันที่ 1 ของเดือน
-    </div>
   </div>
 
-  <div class="footer">อีเมลนี้เป็นระบบตอบกลับอัตโนมัติ กรุณาอย่าตอบกลับ</div>
+  <div class="footer">องค์กรแพทย์ ร.พ. สมุทรสาคร</div>
 
 </div>
 </body>
