@@ -17,10 +17,14 @@
  *             incomplete/no-data/already-sent gap.
  *  Phase 2 — Group by head email: departments sharing the same head email are
  *             batched into ONE email (one email per person, not per department).
+ *             The chief of the medical staff organization (CHIEF_EMAIL) is
+ *             also always added as a recipient of one consolidated email
+ *             covering every department with something new this run — in
+ *             addition to, not instead of, each department's own head email.
  *  Phase 3 — Send: one email per unique address, reporting the month(s)
  *             selected per department in Phase 1. Never resend a month
  *             already logged in email_sent_log (tracked per department per
- *             month).
+ *             month) — this applies regardless of which recipient(s) got it.
  *
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -61,6 +65,12 @@ const CATCHUP_START_MONTH = "2569_04";
 // email_sent_log reset) from producing one enormous email; the remainder
 // gets picked up on the next run since only the sent months get logged.
 const MAX_MONTHS_PER_EMAIL = 6;
+// Chief of the medical staff organization (องค์กรแพทย์) — always gets one
+// consolidated email covering every department that has something new to
+// report this run, on top of (not instead of) each department's own head
+// getting their individual email. No email at all if nothing is new
+// anywhere this run (same trigger condition as the per-department sends).
+const CHIEF_EMAIL = "pee_krp@hotmail.com";
 
 // ── Test-mode overrides (manual workflow_dispatch only, see process-pipeline.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
@@ -341,15 +351,34 @@ async function main() {
     byEmail.get(email).push({ dept, monthsData });
   }
 
+  // ── Chief digest: one consolidated email covering every department with
+  // something new this run, in addition to each head's own email above.
+  // Redirected like everyone else under TEST_EMAIL_OVERRIDE — a test run
+  // must never reach the chief's real inbox. Skipped entirely if nothing is
+  // new anywhere (deptToSend empty), same trigger condition as the heads.
+  const chiefDigestEmails = new Set();
+  if (deptToSend.size > 0) {
+    const chiefEmail = TEST_EMAIL_OVERRIDE ?? CHIEF_EMAIL;
+    chiefDigestEmails.add(chiefEmail);
+    if (!byEmail.has(chiefEmail)) byEmail.set(chiefEmail, []);
+    const chiefEntry = byEmail.get(chiefEmail);
+    const alreadyListed = new Set(chiefEntry.map(e => e.dept));
+    for (const [dept, monthsData] of deptToSend) {
+      if (!alreadyListed.has(dept)) chiefEntry.push({ dept, monthsData });
+    }
+  }
+
   // ── Phase 3: send one email per unique address ──────────────────────────
   const summaryRows = [];
+  const summarizedDepts = new Set(); // a dept sent to both its head AND the chief digest is only tallied once
 
   for (const [email, deptList] of byEmail) {
+    const isChiefDigest = chiefDigestEmails.has(email) && deptList.length > 1;
     const deptNames = deptList.map(d => d.dept).join(", ");
     const monthKeysInBatch = [...new Set(deptList.flatMap(d => d.monthsData.map(m => m.key)))];
     const monthLabel = monthRangeShortLabel(monthKeysInBatch);
 
-    console.log(`\n📧  ${maskEmail(email)}`);
+    console.log(`\n📧  ${maskEmail(email)}${isChiefDigest ? "  [chief digest — all depts]" : ""}`);
     console.log(`    กลุ่มงาน: ${deptNames}`);
     console.log(`    เดือนที่รายงาน: ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}`);
 
@@ -364,7 +393,8 @@ async function main() {
     });
 
     const subjectPrefix = TEST_EMAIL_OVERRIDE ? "[TEST] " : "";
-    const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthLabel} (ครบถ้วน)`;
+    const subjectScope  = isChiefDigest ? "ทุกกลุ่มงาน" : deptNames;
+    const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${subjectScope} เดือน ${monthLabel} (ครบถ้วน)`;
     const plainBody = `รายงานคะแนน P4P — เดือน ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}\nกลุ่มงาน: ${deptNames}`;
 
     await gmail.sendMessage({ to: email, subject, body: plainBody, html });
@@ -376,7 +406,10 @@ async function main() {
           await logEmailSent(sb, key, dept);
         }
       }
-      summaryRows.push({ dept, emailed: true, note: `ส่งแล้ว (${monthsData.map(m => m.displayName).join(", ")})${TEST_EMAIL_OVERRIDE ? " [TEST]" : ""}` });
+      if (!summarizedDepts.has(dept)) {
+        summarizedDepts.add(dept);
+        summaryRows.push({ dept, emailed: true, note: `ส่งแล้ว (${monthsData.map(m => m.displayName).join(", ")})${TEST_EMAIL_OVERRIDE ? " [TEST]" : ""}` });
+      }
     }
   }
 
