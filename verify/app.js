@@ -54,6 +54,12 @@
         }
         const RETURN_TO = safeReturn()
 
+        // On-screen bind debug log is opt-in via ?debug=1. By default a bind
+        // failure shows only the friendly Thai message — the raw error (RPC
+        // names, LIFF internals) is useful for field debugging but shouldn't be
+        // shown to every physician. console.warn still fires unconditionally.
+        const DEBUG = new URLSearchParams(location.search).get("debug") === "1"
+
         // ── DOM refs ──────────────────────────────────────────────────────────
         const emailStep   = document.getElementById("email-step")
         const codeStep    = document.getElementById("code-step")
@@ -205,9 +211,11 @@
                 location.replace(RETURN_TO)
             }).catch(async (err) => {
                 console.warn("LINE bind failed:", err)
-                const ts = new Date().toISOString().slice(11, 19)
-                bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
-                bindDebugLog.classList.remove("hidden")
+                if (DEBUG) {
+                    const ts = new Date().toISOString().slice(11, 19)
+                    bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
+                    bindDebugLog.classList.remove("hidden")
+                }
 
                 const attempts = await recordBindFailure(accessToken)
                 if (attempts >= BIND_ATTEMPT_LIMIT) {

@@ -1,0 +1,51 @@
+name: web tests
+
+# Gate for the web/auth tier (server + LIFF pages). Runs the session unit tests
+# and a SCOPED lint of the maintained files. (Root `eslint .` also covers the
+# status/list/ranking page scripts, which aren't configured yet and are noisy;
+# lint:web keeps this gate meaningful without that pre-existing debt.)
+on:
+  push:
+    paths:
+      - "main.js"
+      - "src/**"
+      - "verify/**"
+      - "assets/**"
+      - "test/**"
+      - "eslint.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/web-tests.yml"
+  pull_request:
+    paths:
+      - "main.js"
+      - "src/**"
+      - "verify/**"
+      - "assets/**"
+      - "test/**"
+      - "eslint.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/web-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Lint (web tier)
+        run: npm run lint:web

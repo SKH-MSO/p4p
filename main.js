@@ -24,15 +24,9 @@ const config = {
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: LINE_ACCESS_TOKEN,
 })
-// Month names, colors, and the 6-month iterator are shared with the rich-menu
-// script via src/constants.cjs (local names kept for readability below).
-const {
-  COLOR_ARRAY: color_array,
-  MONTH_NAMES: month_array,
-  MONTH_ITERATOR: month_iterator,
-  BIND_ATTEMPT_LIMIT,
-  BOUNCE_REASONS,
-} = require("./src/constants.cjs")
+const { BIND_ATTEMPT_LIMIT, BOUNCE_REASONS } = require("./src/constants.cjs")
+// Supabase project config + a thin PostgREST RPC helper (one shared header shape).
+const { SUPABASE_URL, SUPABASE_ANON, rpc } = require("./src/supabase.cjs")
 // Cookie + JWT helpers live in src/session.cjs so they can be unit-tested
 // without booting Express (see test/session.test.cjs).
 const {
@@ -42,6 +36,10 @@ const {
   jwtExp,
   jwtEmail,
 } = require("./src/session.cjs")
+// LINE Flex "choose a month" picker builder and the Telegram approve/reject
+// webhook handler live in their own modules — main.js stays HTTP wiring.
+const { createStatusList } = require("./src/flex.cjs")
+const { telegramWebhookHandler } = require("./src/telegram.cjs")
 
 // ── Server-side session validation ───────────────────────────────────────
 // The LINE (LIFF) in-app browser does not persist a client-side Supabase
@@ -52,8 +50,6 @@ const {
 // the page. The browser only ever holds a short-lived access token in memory.
 const fs = require("node:fs")
 const path = require("node:path")
-const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
-const SUPABASE_ANON = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
 const PAGE_TOKEN_PLACEHOLDER = "__P4P_ACCESS_TOKEN__"
 
 // Gated pages cached as templates; the server fills the token placeholder per
@@ -117,11 +113,7 @@ async function resolveAccessToken(req, res) {
 // underlying data queries are still protected by RLS regardless.
 async function getLineBindGateStatus(email) {
   try {
-    const r = await axios.post(
-      SUPABASE_URL + "/rest/v1/rpc/get_line_bind_gate_status",
-      { p_email: email },
-      { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
-    )
+    const r = await rpc("get_line_bind_gate_status", { p_email: email })
     return (r.data && r.data[0]) || null
   } catch (e) {
     // Fail open, but LOG it: combined with record_bind_failure() also failing
@@ -244,102 +236,13 @@ app.get("/auth/token", async (req, res) => {
   res.json({ access_token: at })
 })
 
-// Receives Telegram's "callback_query" webhook when an admin taps ✅/❌ on the
-// access-request alert (buttons added by scripts/telegram-approve-buttons.sql).
-// Uses the Supabase SERVICE ROLE key to call the approve/reject RPC — that key
-// never leaves this server.
-app.post("/telegram/webhook", express.json({ limit: "64kb" }), async (req, res) => {
-  const receivedSecret = (req.headers["x-telegram-bot-api-secret-token"] || "").trim()
-  const expectedSecret = (TELEGRAM_WEBHOOK_SECRET || "").trim()
-  console.log("[tg-webhook] received. secret header present:", !!req.headers["x-telegram-bot-api-secret-token"])
-
-  // Telegram echoes back the secret set via setWebhook in this header — the
-  // only real proof a request came from Telegram and not a guessed URL. Trim
-  // both sides so an accidental trailing space/newline (easy to introduce
-  // pasting a long value into Vercel's env var UI) doesn't cause a false
-  // mismatch. Log LENGTHS only (never the values) — a length mismatch is a
-  // strong sign of a copy-paste truncation between where the secret was set
-  // (Vercel) and where it was registered (the setWebhook call).
-  if (receivedSecret !== expectedSecret) {
-    console.log(
-      "[tg-webhook] REJECTED: secret mismatch. received len=" + receivedSecret.length +
-      " expected len=" + expectedSecret.length + " (configured=" + !!TELEGRAM_WEBHOOK_SECRET + ")"
-    )
-    return res.sendStatus(401)
-  }
-
-  const cb = req.body && req.body.callback_query
-  if (!cb || !cb.data) {
-    console.log("[tg-webhook] no callback_query.data in body — update type:", Object.keys(req.body || {}).join(","))
-    return res.sendStatus(200)
-  }
-  const [action, token] = String(cb.data).split("|")
-  // Log only a token prefix — it's a single-use approve/reject token for
-  // access_requests, not a long-lived secret, but there's no reason to put
-  // the full value in Vercel's logs when a prefix is enough to correlate.
-  const tokenPreview = token ? token.slice(0, 8) + "…" : token
-  console.log("[tg-webhook] callback_data action:", action, "token:", tokenPreview)
-  if (!token || (action !== "appr" && action !== "rej")) {
-    console.log("[tg-webhook] REJECTED: unparseable callback_data")
-    return res.sendStatus(200)
-  }
-
-  const tg = (method, body) =>
-    axios.post("https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/" + method, body, { timeout: 8000 })
-      .then((r) => { console.log("[tg-webhook] telegram." + method + " ok:", JSON.stringify(r.data)); return r })
-      .catch((e) => {
-        console.error("[tg-webhook] telegram." + method + " FAILED:",
-          e.response ? JSON.stringify(e.response.data) : e.message)
-      })
-
-  try {
-    const fn = action === "appr" ? "approve_access_request" : "reject_access_request"
-    console.log("[tg-webhook] calling Supabase RPC:", fn, "with token:", tokenPreview)
-    const r = await axios.post(
-      SUPABASE_URL + "/rest/v1/rpc/" + fn,
-      { p_token: token },
-      {
-        headers: {
-          apikey: SUPABASE_SERVICE_ROLE_KEY,
-          Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
-          "Content-Type": "application/json",
-        },
-        timeout: 8000,
-      }
-    )
-    console.log("[tg-webhook] RPC response:", JSON.stringify(r.data))
-    const ok = r.data === true
-
-    await tg("answerCallbackQuery", {
-      callback_query_id: cb.id,
-      text: ok
-        ? (action === "appr" ? "อนุมัติแล้ว" : "ปฏิเสธคำขอแล้ว")
-        : "คำขอนี้ถูกดำเนินการไปแล้ว หรือไม่พบข้อมูล",
-    })
-
-    if (ok && cb.message) {
-      const suffix = action === "appr" ? "\n\n✅ อนุมัติแล้ว" : "\n\n❌ ปฏิเสธแล้ว"
-      await tg("editMessageText", {
-        chat_id: cb.message.chat.id,
-        message_id: cb.message.message_id,
-        text: (cb.message.text || "") + suffix,
-        reply_markup: { inline_keyboard: [] },
-      })
-    }
-  } catch (e) {
-    console.error("[tg-webhook] RPC call FAILED:",
-      e.response ? e.response.status + " " + JSON.stringify(e.response.data) : e.message)
-    await tg("answerCallbackQuery", { callback_query_id: cb.id, text: "เกิดข้อผิดพลาด กรุณาลองใหม่" })
-  }
-
-  console.log("[tg-webhook] handler complete, responding 200")
-  // Respond only after ALL Telegram/Supabase calls finish. Vercel's serverless
-  // runtime can freeze the function the instant a response is sent — an early
-  // ack (the previous version of this code) let the platform kill
-  // answerCallbackQuery/editMessageText before they completed, which is why the
-  // button spinner would time out with no confirmation ever showing.
-  res.sendStatus(200)
-})
+// Telegram approve/reject webhook (admin taps ✅/❌ on an access-request alert).
+// The handler itself lives in src/telegram.cjs; secrets are injected here.
+app.post("/telegram/webhook", express.json({ limit: "64kb" }), telegramWebhookHandler({
+  botToken: TELEGRAM_BOT_TOKEN,
+  webhookSecret: TELEGRAM_WEBHOOK_SECRET,
+  serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+}))
 
 // Gated pages: server-validated + token injected (must be registered BEFORE the
 // static mounts so "/status/" hits the handler, while "/status/app.js" etc.
@@ -411,136 +314,6 @@ const handleEvent = async (event) => {
     })
   }
   return Promise.resolve(null)
-}
-
-const createStatusList = () => {
-  const object = {
-    "type": "flex",
-    "altText": "เลือกเดือนที่ต้องการ",
-    "contents": {
-      "type": "bubble",
-      "size": "mega",
-      "header": {
-        "type": "box",
-        "layout": "vertical",
-        "contents": [
-          {
-            "type": "box",
-            "layout": "vertical",
-            "contents": [
-              {
-                "type": "text",
-                "text": "กรุณาเลือกเดือน",
-                "align": "center",
-                "color": "#FFFFFF",
-                "size": "xxl",
-                "margin": "md",
-                "offsetBottom": "sm",
-                "weight": "bold",
-              },
-              {
-                "type": "text",
-                "text": "สามารถดูได้ 6 เดือนย้อนหลัง",
-                "color": "#ffffa0",
-                "align": "center",
-              },
-            ],
-          },
-        ],
-        "backgroundColor": "#4B3D33",
-        "paddingAll": "xxl",
-      },
-      "hero": {
-        "type": "box",
-        "layout": "vertical",
-        "contents": [],
-        "height": "5px",
-        "backgroundColor": "#81A7AE",
-      },
-      "body": {
-        "type": "box",
-        "layout": "vertical",
-        "contents": [
-          createStatusSublist(0),
-          createStatusSublist(1),
-          createStatusSublist(2),
-          createStatusSublist(3),
-          createStatusSublist(4),
-          createStatusSublist(5),
-        ],
-        "backgroundColor": "#F5F5F0",
-      }
-    }
-  }
-  return object
-}
-
-const createStatusSublist = (i) => {
-  const now = new Date()
-  const month = now.getMonth()
-  const year = now.getFullYear() + 543
-  const iterator = month_iterator[month]
-  const name = month_array[iterator[i][0]] + " " + (year + iterator[i][1])
-  const color_hex = color_array[iterator[i][0]][1]
-  const color_tw = color_array[iterator[i][0]][0]
-  const sheetname = (year + iterator[i][1]) + "_" + String(iterator[i][0] + 1).padStart(2, '0')
-  const object = {
-    "type": "box",
-    "layout": "horizontal",
-    "contents": [
-      {
-        "type": "box",
-        "layout": "vertical",
-        "contents": [
-          {
-            "type": "text",
-            "text": name,
-            "align": "center",
-            "size": "lg",
-            "style": "italic",
-            "weight": "bold",
-          },
-        ],
-        "backgroundColor": color_hex,
-        "cornerRadius": "sm",
-        "borderColor": color_hex,
-        "borderWidth": "semi-bold",
-        "flex": 3,
-        "paddingAll": "md",
-      },
-      {
-        "type": "box",
-        "layout": "vertical",
-        "contents": [
-          {
-            "type": "text",
-            "text": "คลิก",
-            "align": "center",
-            "weight": "bold",
-            "size": "lg",
-            "color": "#412D11",
-          },
-        ],
-        "backgroundColor": "#f5f5f5",
-        "cornerRadius": "md",
-        "offsetEnd": "md",
-        "borderColor": "#412D11",
-        "borderWidth": "semi-bold",
-        "flex": 1,
-        "paddingAll": "md",
-        "action": {
-          "type": "uri",
-          "label": sheetname,
-          "uri": "https://liff.line.me/2008561527-a0xP1XmY?sheetname=" +
-            sheetname +
-            "&color=" + color_tw,
-        },
-      },
-    ],
-    "paddingBottom": "xxl",
-    "paddingTop": "xxl",
-  }
-  return object
 }
 
 // On Vercel the exported app is used as the serverless handler.
