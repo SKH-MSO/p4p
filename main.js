@@ -79,6 +79,16 @@ async function resolveAccessToken(req, res) {
   let at = sess.at
   // Refresh only when the cached access token is missing or within 60s of
   // expiry — so a normal browsing session refreshes ~once an hour, not per page.
+  //
+  // CONCURRENCY: near expiry, two near-simultaneous requests (page load +
+  // /auth/token, or rapid navigation) can both read the same refresh token and
+  // both POST a refresh. Supabase rotates the refresh token on first use and
+  // would flag the second as reuse — revoking the whole session — WERE IT NOT
+  // for its "refresh token reuse interval" (default 10s), which hands the same
+  // new token back to both callers. That grace window is what makes this safe:
+  // keep it enabled (see OPERATIONS.md). On Vercel's serverless runtime, function
+  // instances don't share memory, so an in-process lock can't close this race —
+  // the reuse interval is the real safeguard.
   if (!at || jwtExp(at) < Date.now() / 1000 + 60) {
     try {
       const r = await axios.post(
@@ -113,7 +123,13 @@ async function getLineBindGateStatus(email) {
       { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
     )
     return (r.data && r.data[0]) || null
-  } catch {
+  } catch (e) {
+    // Fail open, but LOG it: combined with record_bind_failure() also failing
+    // open (verify/app.js), a Supabase outage lets a valid session skip LINE
+    // binding entirely. That's the intended posture ("never lock a physician
+    // out over an infra blip"), but it should be visible when it happens rather
+    // than degrading silently.
+    console.warn("[gate] get_line_bind_gate_status failed, failing open:", e.message)
     return null
   }
 }
@@ -215,6 +231,18 @@ app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
   res.json({ ok: true })
 })
 app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok: true }) })
+
+// Fresh-access-token endpoint for long-open pages. auth-guard.js calls this
+// when its in-memory token nears expiry: resolveAccessToken re-derives a valid
+// access token from the HttpOnly cookie (refreshing + rotating it if needed),
+// so a page open past the ~1h token TTL keeps working instead of 401-ing. No
+// body, same-origin, cookie-authenticated; returns 401 when there's no usable
+// session so the client stops rather than looping.
+app.get("/auth/token", async (req, res) => {
+  const { at } = await resolveAccessToken(req, res)
+  if (!at) return res.status(401).json({ error: BOUNCE_REASONS.NO_SESSION })
+  res.json({ access_token: at })
+})
 
 // Receives Telegram's "callback_query" webhook when an admin taps ✅/❌ on the
 // access-request alert (buttons added by scripts/telegram-approve-buttons.sql).

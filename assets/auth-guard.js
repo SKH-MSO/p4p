@@ -34,17 +34,67 @@
   if (!at || at === "__P4P_ACCESS_TOKEN__") {
     // Fail-safe: the server should have redirected already, but if not, do it.
     var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
-    global.location.replace("/verify/?return=" + ret + "&reason=no_session")
+    global.location.replace("/verify/?return=" + ret + "&reason=" + P4P.BOUNCE_REASONS.NO_SESSION)
     P4P.db = null
     P4P.ready = new Promise(function () {}) // never resolves — navigating away
     return
   }
 
-  // Data client authenticated with the injected user token. The `accessToken`
-  // provider is the supported way to bring your own token — supabase-js uses it
-  // for every request (verified: sends `Authorization: Bearer <token>`).
+  // Keep the freshest token we have; starts as the server-injected one.
+  var currentToken = at
+
+  // Decode a JWT's exp (seconds since epoch) WITHOUT verifying — used only to
+  // decide when to refresh proactively. Returns 0 if it can't be read.
+  function tokenExp(t) {
+    try {
+      var b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+      while (b64.length % 4) b64 += "="
+      return JSON.parse(global.atob(b64)).exp || 0
+    } catch {
+      return 0
+    }
+  }
+
+  // The injected token has a fixed (~1h) TTL and there is no client-side session
+  // to auto-refresh it — LINE's in-app webview can't persist one, which is the
+  // whole reason auth is server-side. Without this, a page left open past expiry
+  // starts failing every query with 401 and no way to recover. Instead, ask the
+  // server for a fresh token: GET /auth/token re-derives one from the HttpOnly
+  // session cookie (refreshing against Supabase if needed). Single-flighted so
+  // parallel queries share one in-flight request rather than each refreshing.
+  var refreshing = null
+  function clearRefreshing() { refreshing = null }
+  function refreshToken() {
+    if (!refreshing) {
+      refreshing = global
+        .fetch("/auth/token", { headers: { Accept: "application/json" } })
+        .then(function (r) {
+          if (!r.ok) throw new Error("token endpoint " + r.status)
+          return r.json()
+        })
+        .then(function (j) {
+          if (j && j.access_token) currentToken = j.access_token
+          return currentToken
+        })
+        .catch(function () {
+          // Keep the old token; the resulting 401 surfaces the real failure
+          // instead of this refresh attempt silently masking it.
+          return currentToken
+        })
+      // Reset the in-flight marker once settled (no .finally, for older webviews).
+      refreshing.then(clearRefreshing, clearRefreshing)
+    }
+    return refreshing
+  }
+
+  // Data client authenticated with the user token. supabase-js calls this
+  // accessToken provider before every request; we return the current token,
+  // refreshing first whenever it's within 60s of expiry.
   P4P.db = global.supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, {
-    accessToken: function () { return Promise.resolve(at) },
+    accessToken: function () {
+      if (tokenExp(currentToken) < Date.now() / 1000 + 60) return refreshToken()
+      return Promise.resolve(currentToken)
+    },
   })
   reveal()
   P4P.ready = Promise.resolve(true)

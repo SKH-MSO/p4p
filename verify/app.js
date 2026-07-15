@@ -15,14 +15,16 @@
 
         const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
-        // ── LINE userId binding — REQUIRED, not best-effort ─────────────────────
-        // Business rule: we must know every physician's LINE userId as of their
-        // first verification. liff.init() itself can still fail silently (no
-        // LINE-side consequence if it does — see attemptLineBind/runLineBindFlow
-        // below for how a failure is actually handled: retried, then — after
-        // BIND_ATTEMPT_LIMIT tries recorded server-side — let through anyway with
-        // an admin alert, so a genuine device/permission problem can't lock a
-        // physician out of a monthly-use tool forever).
+        // ── LINE userId binding — enforced by default, bounded escape hatch ─────
+        // Goal: know every physician's LINE userId as of their first verification.
+        // This is enforced on every gated page load (main.js re-checks the bind
+        // gate), but it is deliberately NOT an absolute invariant: liff.init() can
+        // fail for device/permission reasons outside the physician's control, so
+        // after BIND_ATTEMPT_LIMIT failed attempts (recorded server-side) they are
+        // let through ANYWAY with a one-time admin alert — see attemptLineBind /
+        // runLineBindFlow below. In other words: best-effort with hard alerting,
+        // not a guarantee. A physician is never permanently locked out of a
+        // monthly-use tool over a binding failure they can't fix themselves.
         //
         // Dedicated LIFF app for THIS page. liff.init() requires the current
         // page to match the LIFF app's registered Endpoint URL — it is NOT
