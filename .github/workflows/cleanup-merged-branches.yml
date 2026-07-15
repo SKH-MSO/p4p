@@ -1,0 +1,50 @@
+name: Cleanup Merged Branches
+
+on:
+  # Manual trigger only from the GitHub Actions tab - never runs on its own.
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "delete" to confirm branch deletion'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  delete-merged-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation
+        if: github.event.inputs.confirm != 'delete'
+        run: |
+          echo "Confirmation input must be exactly 'delete'. Aborting."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete verified merged branches
+        # Branches verified (2026-07-15) as fully merged into main, either by
+        # tree containment or by squash-merge PR history with no commits
+        # pushed after the merge. See cleanup-branches.sh for the full
+        # verification notes and the list of branches deliberately kept.
+        run: |
+          git push origin --delete \
+            claude/code-review-architecture-q2kvgh \
+            claude/email-verification-gate-a9cttq \
+            claude/github-workflows-list-0z0zfg \
+            claude/google-drive-file-count-56zp91 \
+            claude/monthly-p4p-score-tracker-77xhx0 \
+            claude/p4p-head-of-dept-list-0nb4yl \
+            claude/supabase-tables-overview-sc9ls1 \
+            claude/telegram-email-fullname-fifv82 \
+            supabase-auth \
+            claude/email-sent-log-purpose-17co8w \
+            claude/github-workflows-access-o9gjhv \
+            claude/july-button-ranking-display-h3lt9r \
+            claude/p4p-tracker-completed-months-0s0vj1 \
+            claude/supabase-2569-07-rls-a6dm00 \
+            merge-automation
