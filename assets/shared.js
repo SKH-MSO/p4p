@@ -42,6 +42,20 @@
     "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
   ]
 
+  // ── LINE-bind gate constants (browser side) ─────────────────────────────
+  // Mirror of src/constants.cjs — these cannot share a module (this is a plain
+  // browser script, that is CommonJS), so the values are duplicated by hand.
+  // Keep them identical: BIND_ATTEMPT_LIMIT also lives server-side (main.js)
+  // and in Postgres (scripts/line-bind-gate.sql); BOUNCE_REASONS values are
+  // set by the server as ?reason= and read back here (verify/app.js).
+  var BIND_ATTEMPT_LIMIT = 3
+  var BOUNCE_REASONS = {
+    NO_SESSION: "no_session",
+    EXPIRED: "expired",
+    BLOCKED: "blocked",
+    BIND_REQUIRED: "bind_required",
+  }
+
   // Escape text before inserting it into innerHTML (prevents HTML/script injection).
   function escHtml(s) {
     return String(s)
@@ -70,6 +84,8 @@
     COLOR_ARRAY: COLOR_ARRAY,
     THAI_MONTHS: THAI_MONTHS,
     THAI_MONTHS_SHORT: THAI_MONTHS_SHORT,
+    BIND_ATTEMPT_LIMIT: BIND_ATTEMPT_LIMIT,
+    BOUNCE_REASONS: BOUNCE_REASONS,
     escHtml: escHtml,
   }
 })(window)

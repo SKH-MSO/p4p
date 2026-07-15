@@ -7,9 +7,9 @@ export default [
 
   js.configs.recommended,
 
-  // Server entry — CommonJS, Node globals.
+  // Server entry + unit tests — CommonJS, Node globals.
   {
-    files: ["main.js", "src/**/*.cjs"],
+    files: ["main.js", "src/**/*.cjs", "test/**/*.cjs"],
     languageOptions: {
       sourceType: "commonjs",
       ecmaVersion: "latest",
@@ -34,6 +34,22 @@ export default [
       sourceType: "script",
       ecmaVersion: "latest",
       globals: { ...globals.browser },
+    },
+  },
+
+  // Email-verification LIFF page — browser script that loads the Supabase +
+  // LINE LIFF SDKs from CDNs and the shared P4P global (assets/shared.js).
+  {
+    files: ["verify/**/*.js"],
+    languageOptions: {
+      sourceType: "script",
+      ecmaVersion: "latest",
+      globals: {
+        ...globals.browser,
+        supabase: "readonly",
+        liff: "readonly",
+        P4P: "readonly",
+      },
     },
   },
 

@@ -182,7 +182,7 @@
             }
         }
 
-        const BIND_ATTEMPT_LIMIT = 3
+        const BIND_ATTEMPT_LIMIT = P4P.BIND_ATTEMPT_LIMIT
         let currentBindToken = null
 
         // Drives the bind-step UI end to end: attempt -> success (redirect) or
@@ -269,16 +269,16 @@
         const PENDING_KEY = "p4p_verify_pending"
         const PENDING_TTL = 15 * 60 * 1000 // 15 min — after this the OTP is likely dead
         const savePending  = (email) => {
-            try { localStorage.setItem(PENDING_KEY, JSON.stringify({ email, ts: Date.now() })) } catch (e) { /* storage blocked */ }
+            try { localStorage.setItem(PENDING_KEY, JSON.stringify({ email, ts: Date.now() })) } catch { /* storage blocked */ }
         }
         const clearPending = () => {
-            try { localStorage.removeItem(PENDING_KEY) } catch (e) { /* storage blocked */ }
+            try { localStorage.removeItem(PENDING_KEY) } catch { /* storage blocked */ }
         }
         const readPending  = () => {
             try {
                 const p = JSON.parse(localStorage.getItem(PENDING_KEY) || "null")
                 if (p && p.email && Date.now() - p.ts < PENDING_TTL) return p.email
-            } catch (e) { /* ignore */ }
+            } catch { /* ignore */ }
             clearPending()
             return null
         }
@@ -349,10 +349,10 @@
         // main.js re-checks the denylist on every gated-page request); "no_session"
         // is the everyday logged-out case and stays silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === "expired" || bounceReason === "blocked"
-        if (bounceReason === "expired") {
+        const reasonShown = bounceReason === P4P.BOUNCE_REASONS.EXPIRED || bounceReason === P4P.BOUNCE_REASONS.BLOCKED
+        if (bounceReason === P4P.BOUNCE_REASONS.EXPIRED) {
             showNotice("เซสชันหมดอายุ กรุณายืนยันตัวตนอีกครั้ง")
-        } else if (bounceReason === "blocked") {
+        } else if (bounceReason === P4P.BOUNCE_REASONS.BLOCKED) {
             showError("บัญชีของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ")
         }
 

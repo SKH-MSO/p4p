@@ -30,7 +30,18 @@ const {
   COLOR_ARRAY: color_array,
   MONTH_NAMES: month_array,
   MONTH_ITERATOR: month_iterator,
+  BIND_ATTEMPT_LIMIT,
+  BOUNCE_REASONS,
 } = require("./src/constants.cjs")
+// Cookie + JWT helpers live in src/session.cjs so they can be unit-tested
+// without booting Express (see test/session.test.cjs).
+const {
+  setSessionCookie,
+  clearSessionCookie,
+  readSessionCookie,
+  jwtExp,
+  jwtEmail,
+} = require("./src/session.cjs")
 
 // ── Server-side session validation ───────────────────────────────────────
 // The LINE (LIFF) in-app browser does not persist a client-side Supabase
@@ -43,8 +54,6 @@ const fs = require("node:fs")
 const path = require("node:path")
 const SUPABASE_URL = "https://zjeizbrzcltkgtlmkbji.supabase.co"
 const SUPABASE_ANON = "sb_publishable_TcCSpznim4fi0Y7E_zuAsg_op19VZQ-"
-const RT_COOKIE = "p4p_rt"
-const COOKIE_BASE = "HttpOnly; Secure; SameSite=Lax; Path=/"
 const PAGE_TOKEN_PLACEHOLDER = "__P4P_ACCESS_TOKEN__"
 
 // Gated pages cached as templates; the server fills the token placeholder per
@@ -59,61 +68,13 @@ for (const p of gatedPages) {
 // redirect below) — every other visit serves this same template unmodified.
 const verifyTemplate = fs.readFileSync(path.join(__dirname, "verify", "index.html"), "utf8")
 
-function parseCookies(req) {
-  const out = {}
-  const raw = req.headers.cookie
-  if (!raw) return out
-  for (const part of raw.split(";")) {
-    const i = part.indexOf("=")
-    if (i === -1) continue
-    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim())
-  }
-  return out
-}
-// The session cookie holds BOTH tokens as JSON: {at: access, rt: refresh}. We
-// cache the access token so we only hit Supabase's refresh endpoint when it's
-// near expiry — refreshing on every page load rotated the refresh token each
-// time, which Supabase can flag as reuse/theft and revoke the whole session.
-function setSessionCookie(res, at, rt) {
-  const val = encodeURIComponent(JSON.stringify({ at: at, rt: rt }))
-  res.append("Set-Cookie", RT_COOKIE + "=" + val + "; " + COOKIE_BASE + "; Max-Age=34560000")
-}
-function clearSessionCookie(res) {
-  res.append("Set-Cookie", RT_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
-}
-function readSessionCookie(req) {
-  const raw = parseCookies(req)[RT_COOKIE]
-  if (!raw) return null
-  try {
-    const o = JSON.parse(raw)
-    // Valid JSON but no usable refresh token inside — treat as no session
-    // rather than falling through to using the raw JSON string itself as a
-    // (bogus) refresh token.
-    return (o && o.rt) ? { at: o.at || null, rt: o.rt } : null
-  } catch (e) {
-    // Legacy cookie held a bare refresh token (pre-JSON format).
-    return { at: null, rt: raw }
-  }
-}
-// Read a JWT's payload without verifying it (the token itself was already
-// validated by Supabase at /auth/session or the refresh call below — this is
-// just for reading claims out of a token we already trust).
-function jwtPayload(token) {
-  try {
-    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
-    return JSON.parse(Buffer.from(b64, "base64").toString("utf8"))
-  } catch (e) { return {} }
-}
-function jwtExp(token) { return typeof jwtPayload(token).exp === "number" ? jwtPayload(token).exp : 0 }
-function jwtEmail(token) { return jwtPayload(token).email || null }
-
 // Resolve a usable access token from the session cookie: reuse the cached one
 // while it's fresh, otherwise refresh once (rotating the cookie). Returns
 // { at: null, reason } on failure — no cookie ("no_session") or a failed
 // refresh ("expired", cookie cleared) — or { at, reason: null } on success.
 async function resolveAccessToken(req, res) {
   const sess = readSessionCookie(req)
-  if (!sess) return { at: null, reason: "no_session" }
+  if (!sess) return { at: null, reason: BOUNCE_REASONS.NO_SESSION }
 
   let at = sess.at
   // Refresh only when the cached access token is missing or within 60s of
@@ -128,9 +89,9 @@ async function resolveAccessToken(req, res) {
       at = r.data && r.data.access_token
       if (!at) throw new Error("no access_token in refresh response")
       setSessionCookie(res, at, r.data.refresh_token || sess.rt)
-    } catch (e) {
+    } catch {
       clearSessionCookie(res)
-      return { at: null, reason: "expired" }
+      return { at: null, reason: BOUNCE_REASONS.EXPIRED }
     }
   }
   return { at, reason: null }
@@ -152,12 +113,10 @@ async function getLineBindGateStatus(email) {
       { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
     )
     return (r.data && r.data[0]) || null
-  } catch (e) {
+  } catch {
     return null
   }
 }
-
-const BIND_ATTEMPT_LIMIT = 3
 
 // Serve a gated page: require a valid session cookie and inject the current
 // access token via <meta> (no inline script -> no CSP change). On top of
@@ -199,10 +158,10 @@ function servePage(name) {
       if (gate) {
         if (gate.is_blocked) {
           clearSessionCookie(res)
-          return res.redirect(302, "/verify/?reason=blocked#")
+          return res.redirect(302, "/verify/?reason=" + BOUNCE_REASONS.BLOCKED + "#")
         }
         if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
-          return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
+          return res.redirect(302, "/verify/?return=" + ret + "&reason=" + BOUNCE_REASONS.BIND_REQUIRED + "#")
         }
       }
     }
@@ -249,7 +208,7 @@ app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
     await axios.get(SUPABASE_URL + "/auth/v1/user", {
       headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + access_token }, timeout: 8000,
     })
-  } catch (e) {
+  } catch {
     return res.status(401).json({ error: "invalid token" })
   }
   setSessionCookie(res, access_token, refresh_token)
@@ -375,7 +334,7 @@ app.get(["/verify", "/verify/"], async (req, res) => {
     return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length) + "#")
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8")
-  if (req.query.reason !== "bind_required") {
+  if (req.query.reason !== BOUNCE_REASONS.BIND_REQUIRED) {
     return res.send(verifyTemplate)
   }
   const { at } = await resolveAccessToken(req, res)
