@@ -92,8 +92,14 @@ begin
 
   return v_attempts;
 exception when others then
+  -- Fail OPEN toward pass-through, same direction as the client's own catch in
+  -- verify/app.js (recordBindFailure returns BIND_ATTEMPT_LIMIT on error). A
+  -- failure INSIDE the failure-recorder must never trap the physician on the
+  -- retry screen — returning 0 here used to read as "0 attempts, keep trying".
+  -- Any value >= BIND_ATTEMPT_LIMIT makes the client let them through; 999 stays
+  -- correct even if the limit is later raised.
   raise warning 'record_bind_failure failed: %', sqlerrm;
-  return 0;
+  return 999;
 end;
 $$;
 

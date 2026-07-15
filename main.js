@@ -175,6 +175,8 @@ function servePage(name) {
     }
 
     res.setHeader("Content-Type", "text/html; charset=utf-8")
+    // The page embeds a live access token in <meta> — never let it be cached.
+    res.setHeader("Cache-Control", "no-store")
     res.send(pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at))
   }
 }
@@ -231,6 +233,8 @@ app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok:
 // body, same-origin, cookie-authenticated; returns 401 when there's no usable
 // session so the client stops rather than looping.
 app.get("/auth/token", async (req, res) => {
+  // A bearer token must never sit in a cache (browser heuristic or proxy).
+  res.setHeader("Cache-Control", "no-store")
   const { at } = await resolveAccessToken(req, res)
   if (!at) return res.status(401).json({ error: BOUNCE_REASONS.NO_SESSION })
   res.json({ access_token: at })
@@ -268,6 +272,8 @@ app.get(["/verify", "/verify/"], async (req, res) => {
   if (req.query.reason !== BOUNCE_REASONS.BIND_REQUIRED) {
     return res.send(verifyTemplate)
   }
+  // This branch injects a live access token — never cache it.
+  res.setHeader("Cache-Control", "no-store")
   const { at } = await resolveAccessToken(req, res)
   res.send(at ? verifyTemplate.replace(PAGE_TOKEN_PLACEHOLDER, at) : verifyTemplate)
 })

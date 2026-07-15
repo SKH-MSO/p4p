@@ -69,16 +69,26 @@
       refreshing = global
         .fetch("/auth/token", { headers: { Accept: "application/json" } })
         .then(function (r) {
+          if (r.status === 401) {
+            // Session is genuinely gone server-side (cookie missing/expired) —
+            // NOT a transient error. Recover exactly like a missing token on
+            // first load: send the user to re-verify, instead of leaving them
+            // on a page that 401s every query and re-hits /auth/token on each
+            // one. Return a never-resolving promise so no query proceeds on the
+            // dead token while the browser navigates away.
+            var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
+            global.location.replace("/verify/?return=" + ret + "&reason=" + P4P.BOUNCE_REASONS.EXPIRED)
+            return new Promise(function () {})
+          }
           if (!r.ok) throw new Error("token endpoint " + r.status)
-          return r.json()
-        })
-        .then(function (j) {
-          if (j && j.access_token) currentToken = j.access_token
-          return currentToken
+          return r.json().then(function (j) {
+            if (j && j.access_token) currentToken = j.access_token
+            return currentToken
+          })
         })
         .catch(function () {
-          // Keep the old token; the resulting 401 surfaces the real failure
-          // instead of this refresh attempt silently masking it.
+          // Transient (network / 5xx): keep the old token so the query's own
+          // 401 surfaces the real failure instead of this masking it.
           return currentToken
         })
       // Reset the in-flight marker once settled (no .finally, for older webviews).
