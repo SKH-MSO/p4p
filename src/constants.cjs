@@ -41,24 +41,4 @@ const MONTH_ITERATOR = Array.from({ length: 12 }, (_, m) =>
   ])
 )
 
-// ── LINE-bind gate constants (server side) ──────────────────────────────────
-// How many failed LINE-userId bind attempts are allowed before a physician is
-// let through anyway (with a one-time admin alert). This SAME number lives in
-// three runtimes that cannot share a module: here (server, main.js), the
-// browser (assets/shared.js → P4P.BIND_ATTEMPT_LIMIT), and Postgres
-// (scripts/line-bind-gate.sql, the `>= 3` in record_bind_failure). Keep all
-// three in sync; the SQL check is the ultimate authority.
-const BIND_ATTEMPT_LIMIT = 3
-
-// Reasons the server bounces a request to /verify/ (the ?reason= query value).
-// String-matched on both sides — main.js sets them, and the browser
-// (verify/app.js via P4P.BOUNCE_REASONS) reads them back — so a bare literal
-// typo in either half fails silently. Mirror any change in assets/shared.js.
-const BOUNCE_REASONS = {
-  NO_SESSION: "no_session", // everyday logged-out case (stays silent client-side)
-  EXPIRED: "expired", // session lapsed / refresh failed
-  BLOCKED: "blocked", // email is on the denylist (blocked_emails)
-  BIND_REQUIRED: "bind_required", // valid session, LINE userId not yet bound
-}
-
-module.exports = { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR, BIND_ATTEMPT_LIMIT, BOUNCE_REASONS }
+module.exports = { COLOR_ARRAY, MONTH_NAMES, MONTH_ITERATOR }

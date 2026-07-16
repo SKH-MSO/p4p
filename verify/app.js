@@ -15,27 +15,14 @@
 
         const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
-        // Resolve shared constants DEFENSIVELY. shared.js and this file are
-        // separate cached assets, so right after a deploy a webview can load a
-        // fresh app.js against a STALE cached shared.js that predates these
-        // constants. Reading P4P.BOUNCE_REASONS.X directly would then throw and
-        // abort this whole script before the form handlers below ever register
-        // — which stranded users on a dead email form. Fall back to literals so
-        // the page always works regardless of which shared.js is cached.
-        const REASONS = (P4P && P4P.BOUNCE_REASONS) ||
-            { NO_SESSION: "no_session", EXPIRED: "expired", BLOCKED: "blocked", BIND_REQUIRED: "bind_required" }
-        const BIND_LIMIT = (P4P && P4P.BIND_ATTEMPT_LIMIT) || 3
-
-        // ── LINE userId binding — enforced by default, bounded escape hatch ─────
-        // Goal: know every physician's LINE userId as of their first verification.
-        // This is enforced on every gated page load (main.js re-checks the bind
-        // gate), but it is deliberately NOT an absolute invariant: liff.init() can
-        // fail for device/permission reasons outside the physician's control, so
-        // after BIND_ATTEMPT_LIMIT failed attempts (recorded server-side) they are
-        // let through ANYWAY with a one-time admin alert — see attemptLineBind /
-        // runLineBindFlow below. In other words: best-effort with hard alerting,
-        // not a guarantee. A physician is never permanently locked out of a
-        // monthly-use tool over a binding failure they can't fix themselves.
+        // ── LINE userId binding — REQUIRED, not best-effort ─────────────────────
+        // Business rule: we must know every physician's LINE userId as of their
+        // first verification. liff.init() itself can still fail silently (no
+        // LINE-side consequence if it does — see attemptLineBind/runLineBindFlow
+        // below for how a failure is actually handled: retried, then — after
+        // BIND_ATTEMPT_LIMIT tries recorded server-side — let through anyway with
+        // an admin alert, so a genuine device/permission problem can't lock a
+        // physician out of a monthly-use tool forever).
         //
         // Dedicated LIFF app for THIS page. liff.init() requires the current
         // page to match the LIFF app's registered Endpoint URL — it is NOT
@@ -64,12 +51,6 @@
             return "/status/"
         }
         const RETURN_TO = safeReturn()
-
-        // On-screen bind debug log is opt-in via ?debug=1. By default a bind
-        // failure shows only the friendly Thai message — the raw error (RPC
-        // names, LIFF internals) is useful for field debugging but shouldn't be
-        // shown to every physician. console.warn still fires unconditionally.
-        const DEBUG = new URLSearchParams(location.search).get("debug") === "1"
 
         // ── DOM refs ──────────────────────────────────────────────────────────
         const emailStep   = document.getElementById("email-step")
@@ -201,7 +182,7 @@
             }
         }
 
-        const BIND_ATTEMPT_LIMIT = BIND_LIMIT
+        const BIND_ATTEMPT_LIMIT = 3
         let currentBindToken = null
 
         // Drives the bind-step UI end to end: attempt -> success (redirect) or
@@ -222,11 +203,9 @@
                 location.replace(RETURN_TO)
             }).catch(async (err) => {
                 console.warn("LINE bind failed:", err)
-                if (DEBUG) {
-                    const ts = new Date().toISOString().slice(11, 19)
-                    bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
-                    bindDebugLog.classList.remove("hidden")
-                }
+                const ts = new Date().toISOString().slice(11, 19)
+                bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
+                bindDebugLog.classList.remove("hidden")
 
                 const attempts = await recordBindFailure(accessToken)
                 if (attempts >= BIND_ATTEMPT_LIMIT) {
@@ -290,16 +269,16 @@
         const PENDING_KEY = "p4p_verify_pending"
         const PENDING_TTL = 15 * 60 * 1000 // 15 min — after this the OTP is likely dead
         const savePending  = (email) => {
-            try { localStorage.setItem(PENDING_KEY, JSON.stringify({ email, ts: Date.now() })) } catch { /* storage blocked */ }
+            try { localStorage.setItem(PENDING_KEY, JSON.stringify({ email, ts: Date.now() })) } catch (e) { /* storage blocked */ }
         }
         const clearPending = () => {
-            try { localStorage.removeItem(PENDING_KEY) } catch { /* storage blocked */ }
+            try { localStorage.removeItem(PENDING_KEY) } catch (e) { /* storage blocked */ }
         }
         const readPending  = () => {
             try {
                 const p = JSON.parse(localStorage.getItem(PENDING_KEY) || "null")
                 if (p && p.email && Date.now() - p.ts < PENDING_TTL) return p.email
-            } catch { /* ignore */ }
+            } catch (e) { /* ignore */ }
             clearPending()
             return null
         }
@@ -370,10 +349,10 @@
         // main.js re-checks the denylist on every gated-page request); "no_session"
         // is the everyday logged-out case and stays silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === REASONS.EXPIRED || bounceReason === REASONS.BLOCKED
-        if (bounceReason === REASONS.EXPIRED) {
+        const reasonShown = bounceReason === "expired" || bounceReason === "blocked"
+        if (bounceReason === "expired") {
             showNotice("เซสชันหมดอายุ กรุณายืนยันตัวตนอีกครั้ง")
-        } else if (bounceReason === REASONS.BLOCKED) {
+        } else if (bounceReason === "blocked") {
             showError("บัญชีของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ")
         }
 

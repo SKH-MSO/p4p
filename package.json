@@ -7,9 +7,7 @@
   },
   "scripts": {
     "start": "node main.js",
-    "test": "node --test \"test/*.test.cjs\"",
     "lint": "eslint .",
-    "lint:web": "eslint main.js src verify assets test eslint.config.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {
