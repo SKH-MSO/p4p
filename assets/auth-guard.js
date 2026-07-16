@@ -18,6 +18,14 @@
 
   var P4P = global.P4P || (global.P4P = {})
 
+  // Resolve bounce-reason strings DEFENSIVELY: shared.js and this file are
+  // separate cached assets, so a fresh auth-guard.js can load against a stale
+  // cached shared.js that predates P4P.BOUNCE_REASONS. Reading it directly would
+  // throw in the redirect paths below. Fall back to literals so redirects work
+  // regardless of which shared.js is cached.
+  var REASONS = (P4P && P4P.BOUNCE_REASONS) ||
+    { NO_SESSION: "no_session", EXPIRED: "expired", BLOCKED: "blocked", BIND_REQUIRED: "bind_required" }
+
   // Hide the body until we confirm a token is present.
   var style = document.createElement("style")
   style.textContent = "html.p4p-unverified body{visibility:hidden!important}"
@@ -34,7 +42,7 @@
   if (!at || at === "__P4P_ACCESS_TOKEN__") {
     // Fail-safe: the server should have redirected already, but if not, do it.
     var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
-    global.location.replace("/verify/?return=" + ret + "&reason=" + P4P.BOUNCE_REASONS.NO_SESSION)
+    global.location.replace("/verify/?return=" + ret + "&reason=" + REASONS.NO_SESSION)
     P4P.db = null
     P4P.ready = new Promise(function () {}) // never resolves — navigating away
     return
@@ -77,7 +85,7 @@
             // one. Return a never-resolving promise so no query proceeds on the
             // dead token while the browser navigates away.
             var ret = encodeURIComponent(global.location.pathname + global.location.search + global.location.hash)
-            global.location.replace("/verify/?return=" + ret + "&reason=" + P4P.BOUNCE_REASONS.EXPIRED)
+            global.location.replace("/verify/?return=" + ret + "&reason=" + REASONS.EXPIRED)
             return new Promise(function () {})
           }
           if (!r.ok) throw new Error("token endpoint " + r.status)

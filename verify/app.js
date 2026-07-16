@@ -15,6 +15,17 @@
 
         const db = supabase.createClient(P4P.SUPABASE_URL, P4P.SUPABASE_KEY, P4P.SUPABASE_OPTS)
 
+        // Resolve shared constants DEFENSIVELY. shared.js and this file are
+        // separate cached assets, so right after a deploy a webview can load a
+        // fresh app.js against a STALE cached shared.js that predates these
+        // constants. Reading P4P.BOUNCE_REASONS.X directly would then throw and
+        // abort this whole script before the form handlers below ever register
+        // — which stranded users on a dead email form. Fall back to literals so
+        // the page always works regardless of which shared.js is cached.
+        const REASONS = (P4P && P4P.BOUNCE_REASONS) ||
+            { NO_SESSION: "no_session", EXPIRED: "expired", BLOCKED: "blocked", BIND_REQUIRED: "bind_required" }
+        const BIND_LIMIT = (P4P && P4P.BIND_ATTEMPT_LIMIT) || 3
+
         // ── LINE userId binding — enforced by default, bounded escape hatch ─────
         // Goal: know every physician's LINE userId as of their first verification.
         // This is enforced on every gated page load (main.js re-checks the bind
@@ -190,7 +201,7 @@
             }
         }
 
-        const BIND_ATTEMPT_LIMIT = P4P.BIND_ATTEMPT_LIMIT
+        const BIND_ATTEMPT_LIMIT = BIND_LIMIT
         let currentBindToken = null
 
         // Drives the bind-step UI end to end: attempt -> success (redirect) or
@@ -359,10 +370,10 @@
         // main.js re-checks the denylist on every gated-page request); "no_session"
         // is the everyday logged-out case and stays silent.
         const bounceReason = new URLSearchParams(location.search).get("reason")
-        const reasonShown = bounceReason === P4P.BOUNCE_REASONS.EXPIRED || bounceReason === P4P.BOUNCE_REASONS.BLOCKED
-        if (bounceReason === P4P.BOUNCE_REASONS.EXPIRED) {
+        const reasonShown = bounceReason === REASONS.EXPIRED || bounceReason === REASONS.BLOCKED
+        if (bounceReason === REASONS.EXPIRED) {
             showNotice("เซสชันหมดอายุ กรุณายืนยันตัวตนอีกครั้ง")
-        } else if (bounceReason === P4P.BOUNCE_REASONS.BLOCKED) {
+        } else if (bounceReason === REASONS.BLOCKED) {
             showError("บัญชีของท่านถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ")
         }
 
