@@ -52,17 +52,27 @@ const fs = require("node:fs")
 const path = require("node:path")
 const PAGE_TOKEN_PLACEHOLDER = "__P4P_ACCESS_TOKEN__"
 
+// Per-deploy asset version, stamped onto every <script src> query string
+// (?v=__ASSET_VERSION__) in the page templates. It changes on each deploy, so a
+// new HTML always points at fresh JS URLs — preventing the deploy race where a
+// browser pairs a new app.js with a stale cached shared.js (the /verify crash).
+// On Vercel this is the commit SHA; locally it's a per-start timestamp.
+const ASSET_VERSION = process.env.VERCEL_GIT_COMMIT_SHA
+  ? process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 8)
+  : String(Date.now())
+const stampVersion = (html) => html.replace(/__ASSET_VERSION__/g, ASSET_VERSION)
+
 // Gated pages cached as templates; the server fills the token placeholder per
-// request. Files never change at runtime.
+// request. Files never change at runtime, so the version stamp is baked in once.
 const gatedPages = ["status", "list", "ranking"]
 const pageTemplates = {}
 for (const p of gatedPages) {
-  pageTemplates[p] = fs.readFileSync(path.join(__dirname, p, "index.html"), "utf8")
+  pageTemplates[p] = stampVersion(fs.readFileSync(path.join(__dirname, p, "index.html"), "utf8"))
 }
 // /verify/ also carries the same <meta name="p4p-session"> placeholder, used
 // only for the silent LINE-bind bounce (see servePage's "bind_required"
 // redirect below) — every other visit serves this same template unmodified.
-const verifyTemplate = fs.readFileSync(path.join(__dirname, "verify", "index.html"), "utf8")
+const verifyTemplate = stampVersion(fs.readFileSync(path.join(__dirname, "verify", "index.html"), "utf8"))
 
 // Resolve a usable access token from the session cookie: reuse the cached one
 // while it's fresh, otherwise refresh once (rotating the cookie). Returns
@@ -269,11 +279,13 @@ app.get(["/verify", "/verify/"], async (req, res) => {
     return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length) + "#")
   }
   res.setHeader("Content-Type", "text/html; charset=utf-8")
+  // Never cache the verify HTML: it carries the per-deploy ?v= asset stamps, so
+  // a cached copy would keep pointing browsers at stale JS. The bind_required
+  // branch also injects a live token. Tiny page — no-store is cheap.
+  res.setHeader("Cache-Control", "no-store")
   if (req.query.reason !== BOUNCE_REASONS.BIND_REQUIRED) {
     return res.send(verifyTemplate)
   }
-  // This branch injects a live access token — never cache it.
-  res.setHeader("Cache-Control", "no-store")
   const { at } = await resolveAccessToken(req, res)
   res.send(at ? verifyTemplate.replace(PAGE_TOKEN_PLACEHOLDER, at) : verifyTemplate)
 })
