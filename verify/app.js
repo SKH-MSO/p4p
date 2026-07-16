@@ -71,6 +71,7 @@
         const bindRetryBtn   = document.getElementById("bind-retry-btn")
         const bindDebugLog   = document.getElementById("bind-debug-log")
         const msg         = document.getElementById("msg")
+        const emailLoadingDots = document.getElementById("email-loading-dots")
 
         let currentEmail = ""
 
@@ -231,6 +232,15 @@
             runLineBindFlow(injectedToken)
             return
         }
+
+        // ── Email input intro loading state ──────────────────────────────────
+        // Briefly show loading dots over the email input (disabled underneath)
+        // when the page first lands on step 1, then hand control to the user.
+        emailInput.disabled = true
+        setTimeout(() => {
+            emailInput.disabled = false
+            emailLoadingDots.classList.add("hidden")
+        }, 3000)
 
         // ── Physician-name dropdown (request-access step) ───────────────────────
         // Populated from every roster table combined (list_all_physicians RPC —
