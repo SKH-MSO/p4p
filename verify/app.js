@@ -240,7 +240,7 @@
         setTimeout(() => {
             emailInput.disabled = false
             emailLoadingDots.classList.add("hidden")
-        }, 3000)
+        }, 6000)
 
         // ── Physician-name dropdown (request-access step) ───────────────────────
         // Populated from every roster table combined (list_all_physicians RPC —
