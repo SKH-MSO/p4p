@@ -48,7 +48,8 @@ submission email) to the physician identity it was matched to.
 
 - **Columns:** `sender_email` (PK), `sender_display_name`, `email_count`,
   `extracted_name`, `name_source`, `matched_physician`, `department`,
-  `similarity`, `matched` (bool), `updated_at`.
+  `similarity`, `matched` (bool), `updated_at`, `line_user_id` (denormalized
+  from `line_user_bindings`, see below).
 - Replaces a previously-committed `sender-physician-match.csv`. Populated by
   the "Match Sender Emails" GitHub Action (batch, `saveSenderMatch`) and
   incrementally per live submission (`bumpSenderMatch`).
@@ -66,7 +67,8 @@ independent of whether they've ever emailed a submission (covers new hires
 with no submission history yet).
 
 - **Columns:** `email` (PK), `full_name`, `department`, `active` (bool),
-  `created_at`.
+  `created_at`, `line_user_id` (denormalized from `line_user_bindings`, see
+  below).
 - Effective login allow-list is
   `physician_directory UNION sender_physician_match`. Toggling `active =
   false` revokes a directory-based entry without deleting it.
@@ -88,9 +90,13 @@ not an approval gate).
 - Written via the `log_access_request()` RPC, called from `/verify/` when a
   user's email fails the allow-list check.
 - Optional triggers (`scripts/notify-access-request.sql`,
-  `scripts/telegram-approve-buttons.sql`) fire a Telegram alert on INSERT with
-  inline Approve/Reject buttons; approving inserts the physician into
-  `physician_directory` via `approve_access_request()`.
+  `scripts/telegram-approve-buttons.sql`,
+  `scripts/telegram-approve-sender-display-name.sql`,
+  `scripts/telegram-approve-name-match.sql`) fire a Telegram alert on INSERT
+  with inline Approve/Reject buttons, the sender's email display name for
+  comparison, and a match/mismatch indicator between the two; approving
+  inserts the physician into `physician_directory` via
+  `approve_access_request()`.
 - **Access:** RLS, no anon/authenticated SELECT — insert-only via the RPC.
 - Migration: `scripts/security-rls-auth.sql` (Block 0a).
 
@@ -120,9 +126,34 @@ app) is behind a given verified email, for admin investigation. Explicitly
   user can only ever bind their own account. First-verification-wins:
   `line_user_id`/`bound_at` never get overwritten after the initial bind
   (only display name refreshes).
+- `scripts/line-user-id-columns.sql` denormalizes this table's `line_user_id`
+  onto matching rows in `physician_directory` / `sender_physician_match`
+  (whichever has a row for that email — sometimes both) so it's visible in
+  the Table Editor without a join. `line_user_bindings` stays the source of
+  truth; the denormalized copies always mirror it.
 - **Access:** RLS, no anon/authenticated SELECT — write only via the RPC
   (`authenticated` role); read only by `service_role` / dashboard.
-- Migration: `scripts/bind-line-user.sql`.
+- Migration: `scripts/bind-line-user.sql`, `scripts/line-user-id-columns.sql`.
+
+## `line_bind_attempts`
+
+**Purpose:** Counts failed LINE-account bind attempts per email, driving the
+bounded escape hatch — a physician is never permanently blocked over a
+device/permission fault they can't fix.
+
+- **Columns:** `email` (PK), `attempts`, `last_attempt_at`, `admin_notified`
+  (bool).
+- Incremented by `record_bind_failure()`, called from `verify/app.js` each
+  time `bind_line_user_id()`'s prerequisites fail (LIFF init, `getProfile`,
+  or the RPC itself). At 3 attempts (`BIND_ATTEMPT_LIMIT`, mirrored in
+  `src/constants.cjs` / `assets/shared.js`) fires one Telegram admin alert
+  (atomic — `admin_notified` flips exactly once) and the physician is let
+  through anyway. Read by `get_line_bind_gate_status()`, which `main.js`
+  calls on every gated-page request. Row is deleted on a successful bind.
+- **Access:** RLS, fully locked — no anon/authenticated access at all;
+  reached only via `record_bind_failure()` / `get_line_bind_gate_status()`
+  (both `SECURITY DEFINER`) or `service_role`.
+- Migration: `scripts/line-bind-gate.sql`.
 
 ## `email_sent_log`
 
@@ -150,7 +181,7 @@ These tables split into two groups:
    email-processing automation.
 2. **Auth / allow-list plumbing** for the `/verify/` OTP login gate —
    `physician_directory`, `access_requests`, `blocked_emails`,
-   `line_user_bindings`.
+   `line_user_bindings`, `line_bind_attempts`.
 
 All of it is guarded by `SECURITY DEFINER` RPCs, so the underlying email/name
 data is never exposed directly to `anon`/`authenticated` clients — only

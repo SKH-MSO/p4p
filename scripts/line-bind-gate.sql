@@ -1,12 +1,16 @@
 -- ============================================================================
---  P4P — Hard requirement: know every physician's LINE userId on first verify
+--  P4P — Best-effort (with alerting) capture of every physician's LINE userId
 -- ============================================================================
 --  Run scripts/bind-line-user.sql and scripts/line-user-id-columns.sql FIRST.
 --
---  Context: bind_line_user_id() was previously best-effort — any failure
---  (LIFF scope, network, etc.) was silently swallowed and login proceeded
---  with no binding recorded. The business rule is now: we MUST know every
---  physician's LINE userId as of their first verification. This adds:
+--  Context: bind_line_user_id() was previously best-effort AND SILENT — any
+--  failure (LIFF scope, network, etc.) was swallowed and login proceeded with
+--  no binding recorded and nobody notified. The goal now is to know every
+--  physician's LINE userId as of their first verification, ENFORCED on every
+--  gated page load — but bounded: after BIND_ATTEMPT_LIMIT failures the
+--  physician is let through with a one-time admin alert instead of being locked
+--  out over a device/permission fault they can't fix. So it is best-effort with
+--  hard alerting, not an absolute guarantee. This adds:
 --
 --    1. line_bind_attempts — counts failed bind attempts per email (separate
 --       from line_user_bindings, which only ever holds SUCCESSFUL binds).
@@ -88,8 +92,14 @@ begin
 
   return v_attempts;
 exception when others then
+  -- Fail OPEN toward pass-through, same direction as the client's own catch in
+  -- verify/app.js (recordBindFailure returns BIND_ATTEMPT_LIMIT on error). A
+  -- failure INSIDE the failure-recorder must never trap the physician on the
+  -- retry screen — returning 0 here used to read as "0 attempts, keep trying".
+  -- Any value >= BIND_ATTEMPT_LIMIT makes the client let them through; 999 stays
+  -- correct even if the limit is later raised.
   raise warning 'record_bind_failure failed: %', sqlerrm;
-  return 0;
+  return 999;
 end;
 $$;
 
