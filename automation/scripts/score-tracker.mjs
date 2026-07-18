@@ -62,6 +62,14 @@ const CATCHUP_START_MONTH = "2569_04";
 // gets picked up on the next run since only the sent months get logged.
 const MAX_MONTHS_PER_EMAIL = 6;
 
+// Compulsory oversight recipient — BCC'd on every real dept-head email so a
+// central inbox always keeps a copy, independent of the dept_heads table.
+// This is a hard requirement: whenever ANY dept head is emailed on a run,
+// this address must receive that same email too. Skipped only on TEST runs
+// (TEST_EMAIL_OVERRIDE set), which redirect the whole send to a test address
+// and must stay isolated from real inboxes.
+const OVERSIGHT_BCC = "pee_krp@hotmail.com";
+
 // ── Test-mode overrides (manual workflow_dispatch only, see process-pipeline.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
 // address instead of the real dept head — lets you verify a real send
@@ -367,8 +375,12 @@ async function main() {
     const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthLabel} (ครบถ้วน)`;
     const plainBody = `รายงานคะแนน P4P — เดือน ${monthKeysInBatch.map(tableKeyToDisplay).join(", ")}\nกลุ่มงาน: ${deptNames}`;
 
-    await gmail.sendMessage({ to: email, subject, body: plainBody, html });
-    console.log(`    ✉️  ส่งแล้ว`);
+    // On real runs the oversight address is BCC'd on every dept-head email
+    // (compulsory — see OVERSIGHT_BCC). On TEST runs the whole send is already
+    // redirected to the test address, so no oversight copy is added.
+    const bcc = TEST_EMAIL_OVERRIDE ? undefined : OVERSIGHT_BCC;
+    await gmail.sendMessage({ to: email, subject, body: plainBody, html, bcc });
+    console.log(`    ✉️  ส่งแล้ว${bcc ? ` (bcc ${maskEmail(bcc)})` : ""}`);
 
     for (const { dept, monthsData } of deptList) {
       if (!TEST_EMAIL_OVERRIDE) {

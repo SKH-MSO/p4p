@@ -112,10 +112,11 @@ export function createGmailClient() {
    * @param {string}   opts.to
    * @param {string}   opts.subject
    * @param {string}   opts.body                Plain-text body
+   * @param {string}   [opts.bcc]               Blind-copy recipient(s); comma-separated for several. Gmail strips the Bcc header from the delivered message but still delivers to it.
    * @param {string}   [opts.from]              Defaults to authenticated account
    * @param {string}   [opts.replyToMessageId]  Thread reply support
    */
-  async function sendMessage({ to, subject, body, html, from, replyToMessageId, attachments = [] } = {}) {
+  async function sendMessage({ to, subject, body, html, bcc, from, replyToMessageId, attachments = [] } = {}) {
     if (!to || !subject || (!body && !html)) throw new Error("`to`, `subject`, and `body` or `html` are required.");
 
     // Strip CR/LF before these reach a raw header line. None of `to`,
@@ -127,6 +128,7 @@ export function createGmailClient() {
     to      = stripCrlf(to);
     subject = stripCrlf(subject);
     from    = from ? stripCrlf(from) : from;
+    bcc     = bcc ? stripCrlf(bcc) : bcc;
 
     // Encode non-ASCII header values per RFC 2047 (e.g. Thai text in subject)
     const encodeHeader = (str) =>
@@ -148,6 +150,11 @@ export function createGmailClient() {
       }
       return str; // plain address — no encoding needed
     };
+
+    // Encode a comma-separated list of addresses (used for Bcc, which may
+    // carry more than one recipient). Each entry is encoded independently.
+    const encodeAddressList = (str) =>
+      String(str).split(",").map((s) => s.trim()).filter(Boolean).map(encodeAddressHeader).join(", ");
 
     // Resolve thread ID and add In-Reply-To/References headers for thread replies.
     // Extracted to avoid duplicating the same fetch logic in both send paths.
@@ -184,6 +191,7 @@ export function createGmailClient() {
         `Content-Type: multipart/mixed; boundary="${outerBnd}"`,
         `To: ${encodeAddressHeader(to)}`,
         `Subject: ${encodeHeader(subject)}`,
+        ...(bcc ? [`Bcc: ${encodeAddressList(bcc)}`] : []),
         ...(from ? [`From: ${encodeAddressHeader(from)}`] : []),
       ];
 
@@ -234,6 +242,7 @@ export function createGmailClient() {
         `Content-Type: multipart/alternative; boundary="${boundary}"`,
         `To: ${encodeAddressHeader(to)}`,
         `Subject: ${encodeHeader(subject)}`,
+        ...(bcc ? [`Bcc: ${encodeAddressList(bcc)}`] : []),
         ...(from ? [`From: ${encodeAddressHeader(from)}`] : []),
       ];
 
@@ -272,6 +281,7 @@ export function createGmailClient() {
       `Subject: ${encodeHeader(subject)}`,
     ];
 
+    if (bcc)  headerLines.push(`Bcc: ${encodeAddressList(bcc)}`);
     if (from) headerLines.push(`From: ${encodeAddressHeader(from)}`);
 
     const threadId = await resolveThreadHeaders(headerLines);
