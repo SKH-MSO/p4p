@@ -12,12 +12,12 @@
  * unbounded backlog-hunting): Phase A walks the window newest → oldest,
  * skipping — not stopping at — incomplete months to keep looking older,
  * until 2 complete months are found or the window is exhausted. Phase B
- * processes each of those independently, so an already-run, null-scores,
- * or merge-failure outcome on one never blocks the other. Completion is
- * recorded per month in the sk03_run_log Supabase table (mirrors
- * automation/scripts/score-tracker.mjs's email_sent_log pattern), so a
- * repeat trigger (the daily cron firing again, or a manual
- * workflow_dispatch) skips Steps 5/6 for a month already done.
+ * processes each of those independently, so a null-scores or merge-failure
+ * outcome on one never blocks the other. The merged workbook and SK03
+ * spreadsheet are regenerated and overwritten in place on EVERY run for
+ * each complete month — there is no dedup guard, so a repeat trigger (the
+ * daily cron firing again, or a manual workflow_dispatch) always refreshes
+ * the output from the current Drive + Supabase data.
  */
 
 require('dotenv').config();
@@ -1338,62 +1338,6 @@ function showDataflow() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  RUN LOG (sk03_run_log) — dedup guard for Steps 5/6
-// ═══════════════════════════════════════════════════════════════════
-// Mirrors the email_sent_log pattern used by automation/scripts/score-tracker.mjs:
-// once a month's merge + SK03 spreadsheet has been generated, log it here so a
-// repeat trigger (the daily cron firing again, or a manual workflow_dispatch)
-// skips Steps 5/6 for that month instead of regenerating it from scratch.
-const SK03_RUN_LOG_TABLE = 'sk03_run_log';
-
-async function hasSK03Run(supabase, monthKey) {
-  const readOnce = () => supabase
-    .from(SK03_RUN_LOG_TABLE)
-    .select('table_name')
-    .eq('table_name', monthKey)
-    .maybeSingle();
-
-  let { data, error } = await readOnce();
-  if (error) {
-    log(`  [RunLog] ⚠ read failed for ${monthKey}, retrying once: ${error.message}`, 'warn');
-    ({ data, error } = await readOnce());
-  }
-  if (error) {
-    log(`  [RunLog] ⚠ read failed twice for ${monthKey}: ${error.message} — proceeding as not-yet-run`, 'warn');
-    return false;
-  }
-  return data !== null;
-}
-
-/**
- * Upsert a completed month into sk03_run_log. Retries once, then pushes
- * onto runLogFailures on a second failure — the merge + SK03 spreadsheet
- * WERE created successfully, but without this row a repeat trigger has no
- * way to know that and will regenerate them. main() throws at the end if
- * runLogFailures is non-empty, so a lost write turns the job red instead
- * of silently causing tomorrow's run to redo the work (mirrors
- * automation/scripts/score-tracker.mjs's logEmailSent/logSentFailures).
- */
-async function logSK03Run(supabase, monthKey, { mergedFileId, sk03SpreadsheetId }, runLogFailures) {
-  const upsertOnce = () => supabase
-    .from(SK03_RUN_LOG_TABLE)
-    .upsert(
-      { table_name: monthKey, run_at: new Date().toISOString(), merged_file_id: mergedFileId, sk03_spreadsheet_id: sk03SpreadsheetId },
-      { onConflict: 'table_name' }
-    );
-
-  let { error } = await upsertOnce();
-  if (error) {
-    log(`  [RunLog] ⚠ write failed for ${monthKey}, retrying once: ${error.message}`, 'warn');
-    ({ error } = await upsertOnce());
-  }
-  if (error) {
-    log(`  [RunLog] ✗ write failed twice for ${monthKey}: ${error.message} — merge+SK03 WERE created, but a repeat trigger may regenerate them`, 'warn');
-    runLogFailures.push({ key: monthKey, message: error.message });
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════
 //  MAIN
 // ═══════════════════════════════════════════════════════════════════
 async function main() {
@@ -1445,7 +1389,6 @@ async function main() {
   console.log('');
 
   const results = { processed: 0, skipped: 0, failed: [] };
-  const runLogFailures = [];
 
   // ── Phase A — discovery ──────────────────────────────────────────
   // Walk newest → oldest. Steps 2-4 already signal "not ready yet" by
@@ -1455,7 +1398,7 @@ async function main() {
   // it propagates and fails the whole job, same as an unexpected error
   // anywhere else in this script. Stop once TARGET_COMPLETE_MONTHS complete
   // months are found, or the window is exhausted — this is a fixed top-N
-  // scan, not unbounded backlog-hunting past already-logged months.
+  // scan, not unbounded backlog-hunting past older months.
   console.log(`┌─ Discovery ${'─'.repeat(40)}`);
   const completeMonths = [];
   for (const monthInfo of months) {
@@ -1490,13 +1433,10 @@ async function main() {
   for (const { key, driveData, sbData } of completeMonths) {
     console.log(`\n┌─ ${key} ${'─'.repeat(46 - key.length)}`);
     try {
-      log('  [RunLog] Checking sk03_run_log…');
-      if (await hasSK03Run(supabase, key)) {
-        log(`  → Already processed — nothing to do for this month`);
-        results.skipped++; console.log('└─ skipped (already run)\n');
-        continue;
-      }
-      log('  → Not yet run');
+      // SK03 + merged files are regenerated and overwritten on EVERY run for
+      // each complete month — there is deliberately no dedup guard here. The
+      // Drive writes overwrite in place (uploadFileToDrive / createSK03 delete
+      // old copies of the same name), so re-running is idempotent by output.
 
       // Step 4.5
       log('  [Step 4.5] Filling missing scores…');
@@ -1518,10 +1458,7 @@ async function main() {
 
       // Step 6
       log('  [Step 6] Creating SK03 spreadsheet…');
-      const sk03Id = await createSK03(drive, sheets, sbData, key, supabase);
-
-      // Log so a repeat trigger for this same month skips Steps 5/6 above.
-      await logSK03Run(supabase, key, { mergedFileId: uploaded.id, sk03SpreadsheetId: sk03Id }, runLogFailures);
+      await createSK03(drive, sheets, sbData, key, supabase);
 
       results.processed++;
       console.log('└─ ✓ complete\n');
@@ -1539,17 +1476,6 @@ async function main() {
   console.log(` ✗ Failed   : ${results.failed.length}`);
   results.failed.forEach(f => console.log(`     ${f.key}: ${f.error}`));
   console.log('');
-
-  if (runLogFailures.length > 0) {
-    // Fail the run loudly (non-zero exit → red in GitHub Actions) instead of
-    // letting a swallowed sk03_run_log write pass as a green run — the merge
-    // + SK03 spreadsheet were already created, but without this row a repeat
-    // trigger has no way to know that and will regenerate them.
-    throw new Error(
-      `${runLogFailures.length} sk03_run_log write(s) failed after retry — ` +
-      runLogFailures.map(f => `${f.key} (${f.message})`).join('; ')
-    );
-  }
 }
 
 main().catch(err => { console.error('\nFatal:', err.stack ?? err); process.exit(1); });
