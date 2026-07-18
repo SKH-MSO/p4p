@@ -14,10 +14,13 @@
  *       and waits for a later run.
  *   (b) Send — once complete, every head gets ONE single-month report for
  *       that month; departments sharing a head email are grouped into one
- *       email. The oversight address is BCC'd on every real send. Each email
- *       covers exactly one month (no multi-month bundling). Never resend a
- *       (department, month) already logged in email_sent_log. Two months
- *       completing in the same run each send their own single-month email.
+ *       email. Each email covers exactly one month (no multi-month bundling).
+ *       Never resend a (department, month) already logged in email_sent_log.
+ *       Two months completing in the same run each send their own
+ *       single-month email. In addition, the oversight address gets its OWN
+ *       single consolidated email per month — every department sent in that
+ *       run, sorted in Thai dictionary order — rather than a Bcc copy of each
+ *       head's email (skipped on TEST runs).
  *
  * Required env vars (GitHub Secrets):
  *   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
@@ -52,13 +55,14 @@ const CATCHUP_WINDOW_MONTHS = 12;
 // starting from here (May 2026 / พ.ค. 69).
 const CATCHUP_START_MONTH = "2569_05";
 
-// Compulsory oversight recipient — BCC'd on every real dept-head email so a
-// central inbox always keeps a copy, independent of the dept_heads table.
-// This is a hard requirement: whenever ANY dept head is emailed on a run,
-// this address must receive that same email too. Skipped only on TEST runs
-// (TEST_EMAIL_OVERRIDE set), which redirect the whole send to a test address
-// and must stay isolated from real inboxes.
-const OVERSIGHT_BCC = "pee_krp@hotmail.com";
+// Compulsory oversight recipient — gets ONE consolidated email per month
+// covering every department sent in that run (not a Bcc copy of each head's
+// email), independent of the dept_heads table. This is a hard requirement:
+// whenever ANY dept head is emailed on a run, this address must receive a
+// report covering that same set of departments too. Skipped only on TEST
+// runs (TEST_EMAIL_OVERRIDE set), which redirect the whole send to a test
+// address and must stay isolated from real inboxes.
+const OVERSIGHT_EMAIL = "pee_krp@hotmail.com";
 
 // ── Test-mode overrides (manual workflow_dispatch only, see process-pipeline.yml) ──
 // Restrict to specific department(s) and/or redirect the email to a test
@@ -108,6 +112,15 @@ function tableKeyToDisplay(key) {
 function monthShortLabel(key) {
   const [year, month] = key.split("_");
   return `${THAI_MONTHS_SHORT[month] ?? month} ${year.slice(-2)}`;
+}
+
+// Thai dictionary order, not raw Unicode order — leading vowels (เ แ โ ใ ไ)
+// sort as if placed after the consonant they attach to, e.g.
+// "เวชศาสตร์ครอบครัว" sorts under ว, not เ. Used for the oversight email's
+// department listing.
+const thaiCollator = new Intl.Collator("th");
+function sortDeptsThai(list) {
+  return [...list].sort((a, b) => thaiCollator.compare(a.dept, b.dept));
 }
 
 // todayThaiStr is now imported from ../bangkok-date.js (Bangkok-safe; see
@@ -307,6 +320,7 @@ export async function main() {
 
     // (d) Send one email per (head, month).
     console.log(`└─ ครบถ้วน — ส่งอีเมลหัวหน้ากลุ่มงาน`);
+    const sentThisMonth = []; // { dept, status } for every dept actually sent — feeds the oversight email
     for (const [email, deptList] of byEmail) {
       const deptNames = deptList.map(d => d.dept).join(", ");
 
@@ -327,17 +341,39 @@ export async function main() {
       const subject   = `${subjectPrefix}รายงานคะแนน P4P ของกลุ่มงาน ${deptNames} เดือน ${monthShortLabel(monthKey)} (ครบถ้วน)`;
       const plainBody = `รายงานคะแนน P4P — เดือน ${monthDisplay}\nกลุ่มงาน: ${deptNames}`;
 
-      // On real runs the oversight address is BCC'd on every dept-head email
-      // (compulsory — see OVERSIGHT_BCC). On TEST runs the whole send is already
-      // redirected to the test address, so no oversight copy is added.
-      const bcc = TEST_EMAIL_OVERRIDE ? undefined : OVERSIGHT_BCC;
-      await gmail.sendMessage({ to: email, subject, body: plainBody, html, bcc });
-      console.log(`    📧  ${maskEmail(email)} — ${deptNames}${bcc ? ` (bcc ${maskEmail(bcc)})` : ""}`);
+      await gmail.sendMessage({ to: email, subject, body: plainBody, html });
+      console.log(`    📧  ${maskEmail(email)} — ${deptNames}`);
 
-      for (const { dept } of deptList) {
+      for (const { dept, status } of deptList) {
         if (!TEST_EMAIL_OVERRIDE) await logEmailSent(sb, monthKey, dept);
         summaryRows.push({ month: monthDisplay, dept, emailed: true, note: `ส่งแล้ว${TEST_EMAIL_OVERRIDE ? " [TEST]" : ""}` });
+        sentThisMonth.push({ dept, status });
       }
+    }
+
+    // Oversight gets its OWN single email per month covering every department
+    // just sent, sorted in Thai dictionary order — not a Bcc of each head's
+    // email. Skipped on TEST runs (already redirected to the test address).
+    if (sentThisMonth.length > 0 && !TEST_EMAIL_OVERRIDE) {
+      const sortedDepts = sortDeptsThai(sentThisMonth);
+      const introText = `สรุปรายงานคะแนน P4P ของทุกกลุ่มงานที่ครบถ้วนแล้ว ประจำเดือน ` +
+        `${monthDisplay} กดชื่อแพทย์เพื่อเปิดไฟล์ Excel บน Google Drive`;
+
+      const html = buildScoreReportEmail({
+        depts: sortedDepts.map(d => ({
+          dept: d.dept,
+          monthsSummary: [{ displayName: monthDisplay, status: d.status }],
+        })),
+        reportDate: todayStr,
+        intro: introText,
+      });
+
+      const subject   = `สรุปรายงานคะแนน P4P ทุกกลุ่มงาน เดือน ${monthShortLabel(monthKey)} (ครบถ้วน)`;
+      const plainBody = `สรุปรายงานคะแนน P4P — เดือน ${monthDisplay}\nกลุ่มงาน: ${sortedDepts.map(d => d.dept).join(", ")}`;
+
+      await gmail.sendMessage({ to: OVERSIGHT_EMAIL, subject, body: plainBody, html });
+      console.log(`    📧  ${maskEmail(OVERSIGHT_EMAIL)} — สรุปทุกกลุ่มงาน (${sortedDepts.length} กลุ่มงาน)`);
+      summaryRows.push({ month: monthDisplay, dept: "(สรุปทุกกลุ่มงาน)", emailed: true, note: `ส่งแล้ว — ${OVERSIGHT_EMAIL}` });
     }
     console.log();
   }
