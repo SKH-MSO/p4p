@@ -261,10 +261,11 @@ export async function main() {
   // ── Per-month whole-month gate → send ───────────────────────────────────
   // Month is the OUTER loop. No head is emailed for a month until every
   // non-intern department that month is complete (isMonthComplete). Once it
-  // is, every head gets ONE single-month report for that month (BCC oversight
-  // address), logged once per (dept, month) so it never resends. Each month
-  // is independent — two months completing in the same run each send their
-  // own single-month email; no email ever bundles two months.
+  // is, every head gets ONE single-month report for that month, logged once
+  // per (dept, month) so it never resends; oversight then gets its own single
+  // consolidated email covering every department just sent. Each month is
+  // independent — two months completing in the same run each send their own
+  // single-month emails; no email ever bundles two months.
   const summaryRows = [];
 
   for (const monthKey of monthsAsc) {
