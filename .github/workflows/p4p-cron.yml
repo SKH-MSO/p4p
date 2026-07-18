@@ -2,7 +2,8 @@ name: "! extract email"
 
 on:
   schedule:
-    - cron: "0 */2 * * *"   # every 2 hours
+    # :17 avoids queuing behind everyone else's top-of-hour crons (mirrors process-pipeline.yml)
+    - cron: "17 */2 * * *"   # every 2 hours, offset to :17
   workflow_dispatch:          # also allow manual trigger from GitHub UI
 
 permissions:
