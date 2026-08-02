@@ -32,6 +32,7 @@
         const byname_label   = document.getElementById("byname_label")
         const bydep_input    = document.getElementById("bydep_input")
         const bydep_label    = document.getElementById("bydep_label")
+        const dep_select     = document.getElementById("dep_select")
         const content        = document.getElementById("content")
         const load           = document.getElementById("load")
         const pending        = document.getElementById("pending")
@@ -70,6 +71,17 @@
 
         const topping = () => { window.scrollTo({ top: 0, behavior: "smooth" }) }
 
+        // Thai dictionary order per dep_array, falling back to localeCompare
+        // for any department not in that hardcoded list.
+        const sortDeps = (list) => [...list].sort((a, b) => {
+            const ia = dep_array.indexOf(a)
+            const ib = dep_array.indexOf(b)
+            if (ia === -1 && ib === -1) return a.localeCompare(b, "th")
+            if (ia === -1) return 1
+            if (ib === -1) return -1
+            return ia - ib
+        })
+
         // Build a searchable row (used by fulling & parting)
         const makeSearchRow = (entry) => {
             const tr      = document.createElement("tr")
@@ -95,21 +107,33 @@
         // Render grouped (by department) rows into tbody_searchable
         const renderGrouped = (data) => {
             if (data.length === 0) { searchable.style.display = "none"; return }
-            for (let i = 0; i < dep_array.length; i++) {
+            const deps = sortDeps([...new Set(data.map(e => e[2]))])
+            for (const dep of deps) {
                 const depEntries = data
-                    .filter(e => e[2] === dep_array[i])
+                    .filter(e => e[2] === dep)
                     .sort((a, b) => a[1].localeCompare(b[1], "th"))
                 if (depEntries.length === 0) continue
                 const tr_h = document.createElement("tr")
                 tr_h.classList.add("dep-header")
                 const td_h = document.createElement("td")
                 td_h.colSpan = 2
-                td_h.innerText = dep_array[i] === "INTERN" ? "INTERN" : "กลุ่มงาน" + dep_array[i]
+                td_h.innerText = dep === "INTERN" ? "INTERN" : "กลุ่มงาน" + dep
                 tr_h.appendChild(td_h)
                 tbody_searchable.appendChild(tr_h)
                 for (const entry of depEntries) {
                     tbody_searchable.appendChild(makeSearchRow(entry))
                 }
+            }
+        }
+
+        // Populate dep_select with unique departments from the loaded roster
+        const populateDepSelect = () => {
+            const deps = sortDeps([...new Set(arr.map(e => e[2]).filter(Boolean))])
+            for (const dep of deps) {
+                const opt = document.createElement("option")
+                opt.value = dep
+                opt.innerText = dep === "INTERN" ? "INTERN" : "กลุ่มงาน" + dep
+                dep_select.appendChild(opt)
             }
         }
 
@@ -124,6 +148,8 @@
             topping()
             bydep_input.checked  = !this.checked
             header_search.value  = ""
+            dep_select.value     = ""
+            dep_select.hidden    = true
         })
 
         bydep_input.addEventListener("change", function () {
@@ -133,6 +159,26 @@
             topping()
             byname_input.checked = !this.checked
             header_search.value  = ""
+            dep_select.value     = ""
+            dep_select.hidden    = false
+        })
+
+        dep_select.addEventListener("change", function () {
+            header_search.value = ""
+            while (tbody_searchable.firstChild) {
+                tbody_searchable.removeChild(tbody_searchable.lastChild)
+            }
+            if (this.value === "") {
+                pending.style.display    = "block"
+                sent.style.display       = "block"
+                searchable.style.display = "none"
+                return
+            }
+            pending.style.display    = "none"
+            sent.style.display       = "none"
+            searchable.style.display = "block"
+            renderGrouped(arr.filter((e) => e[2] === this.value))
+            topping()
         })
 
         header_search.addEventListener("focus", function () {
@@ -140,6 +186,7 @@
             sent.style.display       = "block"
             searchable.style.display = "none"
             this.value = ""
+            dep_select.value = ""
         })
 
         header_search.addEventListener("input", function () {
@@ -215,6 +262,7 @@
                 byname_label.classList.add("active")
                 bydep_input.disabled   = false
                 bydep_label.classList.add("active")
+                dep_select.disabled    = false
                 load.style.display     = "none"
                 pending.style.display  = "block"
                 sent.style.display     = "block"
@@ -243,6 +291,8 @@
 
                 pendingEntries.sort((a, b) => a.fullname.localeCompare(b.fullname, "th"))
                 sentEntries.sort((a, b) => a.fullname.localeCompare(b.fullname, "th"))
+
+                populateDepSelect()
 
                 const makeRow = (fullname, department, isSent) => {
                     const tr      = document.createElement("tr")

@@ -163,6 +163,19 @@
         .radio-option label.active { color: var(--text); }
         input[type="radio"] { accent-color: var(--primary); cursor: pointer; }
 
+        #dep_select {
+            width: 100%;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 12px;
+            background: var(--neutral);
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+        #dep_select[hidden] { display: none; }
+        #dep_select:disabled { opacity: 0.5; }
+
         /* Content */
         #content {
             display: none;
@@ -327,6 +340,9 @@
                     <label id="bydep_label" for="bydep_input">ชื่อกลุ่มงาน</label>
                 </div>
             </div>
+            <select id="dep_select" hidden disabled>
+                <option value="">ทุกกลุ่มงาน</option>
+            </select>
         </div>
     </div>
 
