@@ -22,9 +22,13 @@
 --    3. Copies structure from p_old (LIKE ... INCLUDING ALL — columns, indexes,
 --       constraints, defaults; NOT rows and NOT RLS policies).
 --    4. Grants service_role full CRUD on the new table.
---    5. Copies the physician ROSTER only (prefix, firstname, lastname,
---       department, position, type, rank) — score / submitted_at stay NULL,
---       since nobody has submitted for the new month yet.
+--    5. Copies the physician ROSTER: every column of p_old EXCEPT index
+--       (regenerated from its gen_random_uuid() default so new-month rows
+--       get fresh ids), score, and submitted_at (reset to NULL, since nobody
+--       has submitted for the new month yet). The column list is read from
+--       information_schema at run time — NOT hardcoded — so any roster
+--       column added later (e.g. position/type/rank) is carried over
+--       automatically instead of silently coming through NULL.
 --    6. The CREATE TABLE in step 3 already fired trg_secure_new_roster
 --       (security-rls-auth.sql), which enables RLS, creates the
 --       "verified read roster" policy (authenticated + is_current_user_
@@ -46,8 +50,9 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  n_cols   int;
-  n_rows   bigint;
+  n_cols     int;
+  n_rows     bigint;
+  v_cols     text;
 begin
   -- 1. Validate identifiers before interpolating them into dynamic SQL.
   if p_new !~ '^(2[4-7][0-9]{2})_(0[1-9]|1[0-2])$' then
@@ -74,11 +79,22 @@ begin
   -- 4. Service_role CRUD (the automation writes scores here).
   execute format('grant select, insert, update, delete on public.%I to service_role;', p_new);
 
-  -- 5. Roster rows only — score / submitted_at reset (left NULL).
+  -- 5. Roster rows — every column except index/score/submitted_at, carried
+  --    over dynamically so newly-added roster columns are never dropped.
+  select string_agg(quote_ident(column_name), ', ' order by ordinal_position)
+  into v_cols
+  from information_schema.columns
+  where table_schema = 'public'
+    and table_name = p_old
+    and column_name not in ('index', 'score', 'submitted_at');
+
+  if v_cols is null then
+    raise exception 'provision_month: could not read columns of public.%', p_old;
+  end if;
+
   execute format(
-    'insert into public.%I (prefix, firstname, lastname, department, position, type, rank)
-     select prefix, firstname, lastname, department, position, type, rank from public.%I order by index;',
-    p_new, p_old
+    'insert into public.%I (%s) select %s from public.%I order by index;',
+    p_new, v_cols, v_cols, p_old
   );
   get diagnostics n_rows = row_count;
 
