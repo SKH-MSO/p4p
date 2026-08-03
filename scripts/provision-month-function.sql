@@ -23,8 +23,8 @@
 --       constraints, defaults; NOT rows and NOT RLS policies).
 --    4. Grants service_role full CRUD on the new table.
 --    5. Copies the physician ROSTER only (prefix, firstname, lastname,
---       department) — score / submitted_at stay NULL, since nobody has
---       submitted for the new month yet.
+--       department, position, type, rank) — score / submitted_at stay NULL,
+--       since nobody has submitted for the new month yet.
 --    6. The CREATE TABLE in step 3 already fired trg_secure_new_roster
 --       (security-rls-auth.sql), which enables RLS, creates the
 --       "verified read roster" policy (authenticated + is_current_user_
@@ -76,8 +76,8 @@ begin
 
   -- 5. Roster rows only — score / submitted_at reset (left NULL).
   execute format(
-    'insert into public.%I (prefix, firstname, lastname, department)
-     select prefix, firstname, lastname, department from public.%I order by index;',
+    'insert into public.%I (prefix, firstname, lastname, department, position, type, rank)
+     select prefix, firstname, lastname, department, position, type, rank from public.%I order by index;',
     p_new, p_old
   );
   get diagnostics n_rows = row_count;
