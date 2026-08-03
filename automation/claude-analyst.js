@@ -50,34 +50,41 @@ export function resolveBeYear(filename, subject, body, emailDate = null) {
   // Scan by CONFIDENCE TIER across all sources rather than all tiers within one source.
   // This prevents a weak match (e.g. "15" → short CE 2558) in the subject from winning
   // over a strong match ("2569" → full BE) in the filename.
-  // Within each tier, source priority is: subject > body > filename.
+  // Within each tier, all sources are collected and the NEWEST (largest) year wins,
+  // rather than the first source found — e.g. a stale year left in an email subject
+  // (from a copy-pasted previous month's email) must not shadow a newer, more
+  // reliable year in the filename or attachment.
   const all    = [subject ?? "", body ?? "", filename ?? ""];
   const noBody = [subject ?? "", filename ?? ""];   // body excluded from short-CE scan (day numbers)
 
   // Tier 1 — full BE year 25xx (unambiguous — always wins)
-  for (const t of all) {
-    const m = t.match(/(?<!\d)(25\d{2})(?!\d)/);
-    if (m) return parseInt(m[1], 10);
-  }
+  const tier1 = all
+    .map(t => t.match(/(?<!\d)(25\d{2})(?!\d)/))
+    .filter(Boolean)
+    .map(m => parseInt(m[1], 10));
+  if (tier1.length) return Math.max(...tier1);
 
   // Tier 2 — full CE year 20xx
-  for (const t of all) {
-    const m = t.match(/(?<!\d)(20\d{2})(?!\d)/);
-    if (m) return parseInt(m[1], 10) + 543;
-  }
+  const tier2 = all
+    .map(t => t.match(/(?<!\d)(20\d{2})(?!\d)/))
+    .filter(Boolean)
+    .map(m => parseInt(m[1], 10) + 543);
+  if (tier2.length) return Math.max(...tier2);
 
   // Tier 3 — 2-digit short BE 43–99 (e.g. 69 → 2569)
-  for (const t of all) {
-    const m = t.match(/(?<!\d)(4[3-9]|[5-9]\d)(?!\d)/);
-    if (m) return 2500 + parseInt(m[1], 10);
-  }
+  const tier3 = all
+    .map(t => t.match(/(?<!\d)(4[3-9]|[5-9]\d)(?!\d)/))
+    .filter(Boolean)
+    .map(m => 2500 + parseInt(m[1], 10));
+  if (tier3.length) return Math.max(...tier3);
 
   // Tier 4 — 2-digit short CE 00–42 (e.g. 26 → 2026 → 2569)
   // Body excluded: day numbers like "วันที่ 15" are too noisy.
-  for (const t of noBody) {
-    const m = t.match(/(?<!\d)([0-3]\d|4[0-2])(?!\d)/);
-    if (m) return 2000 + parseInt(m[1], 10) + 543;
-  }
+  const tier4 = noBody
+    .map(t => t.match(/(?<!\d)([0-3]\d|4[0-2])(?!\d)/))
+    .filter(Boolean)
+    .map(m => 2000 + parseInt(m[1], 10) + 543);
+  if (tier4.length) return Math.max(...tier4);
 
   // Tier 5 — no year mentioned anywhere: fall back to the email's received
   // date. Submissions are near-always for the current or previous month, so
@@ -735,12 +742,14 @@ export async function analyseJson(jsonData, filename = "data.json") {
     : `Name not pre-detected — search in order: (1) filename "${file}", (2) email subject/body, (3) row data.`;
   console.log(`│        👤  JS name pre-scan: ${resolvedName ?? "null (will use sheet)"}`);
 
-  // Resolve BE year per-source (subject → body → filename) for highest accuracy
+  // Resolve BE year across subject/body/filename/row-data, picking the newest
+  // (largest) year among all sources — a stale year in one source (e.g. an
+  // email subject copy-pasted from a previous month) must not shadow a
+  // newer, more reliable year found in the filename or sheet content.
   let resolvedBE = resolveBeYear(file, subject, body);
-  if (!resolvedBE) {
-    resolvedBE = resolveBeYearFromRows(rows);
-    if (resolvedBE) console.log(`│        📅  JS year from row data: ${resolvedBE}`);
-  }
+  const rowsBE = resolveBeYearFromRows(rows);
+  if (rowsBE) console.log(`│        📅  JS year from row data: ${rowsBE}`);
+  if (rowsBE && (!resolvedBE || rowsBE > resolvedBE)) resolvedBE = rowsBE;
   if (!resolvedBE && emailDate) {
     resolvedBE = resolveBeYear(file, subject, body, emailDate);
     if (resolvedBE) console.log(`│        📅  JS year from email received date: ${resolvedBE}`);

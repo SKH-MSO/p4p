@@ -24,9 +24,31 @@ test("body day number does not pollute result", () => {
   assert.equal(resolveBeYear("report.xlsx", "", "วันที่ 28 มีนาคม"), null);
 });
 
-test("filename takes priority over subject", () => {
-  // Filename: BE 2568, Subject: CE 2026 (→ BE 2569) — filename wins
+test("unambiguous full-BE match still outranks a lower-confidence CE match", () => {
+  // Filename: BE 2568 (Tier 1, unambiguous). Subject: CE 2026 → BE 2569 (Tier 2).
+  // Tier 1 always wins over Tier 2 regardless of value — only within the
+  // same tier does "newest wins" apply (see next test).
   assert.equal(resolveBeYear("P4P_2568.xlsx", "2026", ""), 2568);
+});
+
+test("within the same tier, newest year across sources wins, not first source", () => {
+  // Both filename (2568) and subject (2569) are Tier-1 full-BE matches —
+  // the newer one must win, not whichever source is scanned first.
+  assert.equal(resolveBeYear("P4P_2568.xlsx", "2569", ""), 2569);
+});
+
+test("stale year in subject does not shadow newer year in filename (ธงชัย case)", () => {
+  // Reproduces the real bug: subject carries a stale "2566" (copy-pasted
+  // from a previous email) while the filename has the correct "2569".
+  // Both are Tier-1 full-BE matches — the newer one must win.
+  assert.equal(
+    resolveBeYear(
+      "ธงชัย สวัสดิ์มงคลกุล  กรกฏาคม 2569.xlsx",
+      "P4P กรกฏาคม 2566",
+      "ขอบคุณ\n\n นพ.ธงชัย สวัสดิ์มงคลกุล"
+    ),
+    2569
+  );
 });
 
 test("returns null when no year found", () => {
