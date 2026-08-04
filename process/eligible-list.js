@@ -77,9 +77,11 @@ function formatRunTime() {
 //  Step 2 — fetch the month's roster from Supabase
 // ═══════════════════════════════════════════════════════════════════
 async function fetchRoster(supabase, monthKey) {
-  const { data, error } = await supabase
-    .from(monthKey)
-    .select('prefix, firstname, lastname, department, position, level, type');
+  // select('*') rather than naming columns: roster table shape has drifted
+  // across months in the past (see process/process.js's sbVal() fallback
+  // pattern), and an explicit select() 400s hard on a missing column where
+  // '*' just omits it — fields are read with a '' fallback below regardless.
+  const { data, error } = await supabase.from(monthKey).select('*');
 
   if (error) {
     throw new Error(`Failed to read roster table "${monthKey}": ${error.message}`);
@@ -163,7 +165,7 @@ function buildDeptSectionHtml({ dept, rows }) {
           <td class="name">${escHtml(nameCell)}</td>
           <td>${escHtml(r.position ?? '')}</td>
           <td>${escHtml(r.type ?? '')}</td>
-          <td>${escHtml(r.level ?? '')}</td>
+          <td>${escHtml(r.rank ?? '')}</td>
         </tr>`;
       }).join('');
 
