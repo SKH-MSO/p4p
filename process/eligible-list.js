@@ -59,7 +59,7 @@ function getTargetMonth() {
   const beYear = now.getUTCFullYear() + 543;
   const month  = now.getUTCMonth() + 1;
   const mm     = String(month).padStart(2, '0');
-  return { key: `${beYear}_${mm}`, beYear, month, fileName: `eligible_${beYear}${mm}.pdf` };
+  return { key: `${beYear}_${mm}`, beYear, month, fileName: `eligible_${beYear}-${mm}.pdf` };
 }
 
 /** Bangkok "generated at" timestamp, e.g. "1 ส.ค. 2568, 09.00 น." */
