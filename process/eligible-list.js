@@ -121,18 +121,18 @@ function groupByDepartment(rows) {
 //  dependency, no garbled/missing glyphs on the CI runner).
 // ═══════════════════════════════════════════════════════════════════
 function loadFontFaceCss() {
-  const regular = fs.readFileSync(path.join(CONFIG.fontDir, 'NotoSansThai-Regular.ttf')).toString('base64');
-  const bold    = fs.readFileSync(path.join(CONFIG.fontDir, 'NotoSansThai-Bold.ttf')).toString('base64');
+  const regular = fs.readFileSync(path.join(CONFIG.fontDir, 'Sarabun-Regular.woff2')).toString('base64');
+  const bold    = fs.readFileSync(path.join(CONFIG.fontDir, 'Sarabun-Bold.woff2')).toString('base64');
   return `
     @font-face {
-      font-family: 'NotoSansThai';
+      font-family: 'Sarabun';
       font-weight: 400;
-      src: url(data:font/ttf;base64,${regular}) format('truetype');
+      src: url(data:font/woff2;base64,${regular}) format('woff2');
     }
     @font-face {
-      font-family: 'NotoSansThai';
+      font-family: 'Sarabun';
       font-weight: 700;
-      src: url(data:font/ttf;base64,${bold}) format('truetype');
+      src: url(data:font/woff2;base64,${bold}) format('woff2');
     }
   `;
 }
@@ -203,7 +203,7 @@ function buildHtml(target, groups, runTime) {
   ${loadFontFaceCss()}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'NotoSansThai', sans-serif;
+    font-family: 'Sarabun', sans-serif;
     color: #1e2d3d;
     font-size: 13px;
     line-height: 1.5;
@@ -252,6 +252,7 @@ function buildHtml(target, groups, runTime) {
     width: 100%;
     border-collapse: collapse;
     background: #fff;
+    border: 1px solid #1e3a5f;
   }
   thead tr { background: #D9E1F2; }
   th {
@@ -261,14 +262,17 @@ function buildHtml(target, groups, runTime) {
     font-size: 13px;
     color: #2c3e50;
     border-bottom: 2px solid #b4c6e0;
+    border-right: 1px solid #b4c6e0;
     white-space: nowrap;
   }
   td {
     padding: 7px 12px;
     border-bottom: 1px solid #e8edf5;
+    border-right: 1px solid #e8edf5;
     vertical-align: middle;
     font-size: 13px;
   }
+  th:last-child, td:last-child { border-right: none; }
   tr.alt { background: #F3F6FB; }
   tr:last-child td { border-bottom: none; }
   .num, .th-num { width: 40px; text-align: center; white-space: nowrap; }
