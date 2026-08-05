@@ -155,3 +155,80 @@ test("whole-sheet fallback still finds a score when every number looks year-like
   assert.equal(score, 2500);
   assert.match(method, /year-like fallback/);
 });
+
+test("total typed as a free-text summary line wins over line-item numbers", () => {
+  // Real-world file (P4P มิย 69): the physician wrote the month's totals as
+  // prose under the table instead of leaving them in numeric cells. Nothing
+  // numeric held the real total, so "largest in sheet" returned 1320 — an
+  // admin line-item weight — against a stated total of 3260. Note the service
+  // subtotal (1940) is invisible to the numeric passes twice over: it shares
+  // its row with a count (74), and 1940 is inside isYearLike's 1900–2099 range.
+  const rows = [
+    { col_2: "รวม ", col_4: 74, col_5: 1940 },
+    { col_1: "งานบริหาร ", col_2: "หัวหน้ากลุ่มงาน", col_3: 1320 },
+    { col_5: "สรุป  มิย 2569        งานบริการ = 1940" },
+    { col_8: "        งานบริหาร =  1320" },
+    { col_8: "         รวม =  3260" },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 3260);
+  assert.match(method, /free-text summary/);
+});
+
+test("summary line with no separator (label + number only) is still read", () => {
+  const rows = [
+    { col_1: "item A", col_5: 40 },
+    { col_1: "รวม  100" },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 100);
+  assert.match(method, /free-text summary/);
+});
+
+test("a year sharing a summary cell is not read as the total", () => {
+  // "สรุป" is not a total label, so the "= 1940" here must not match — and the
+  // 2569 ahead of it must never become a candidate.
+  const rows = [
+    { col_5: "สรุป  มิย 2569        งานบริการ = 1940" },
+    { col_1: "item A", col_5: 300 },
+  ];
+  const { score } = extractScoreFromRows(rows);
+  assert.equal(score, 300);
+});
+
+test("a count that merely contains the word รวม is not read as a total", () => {
+  // "จำนวนรวม 74" is a column count. The label does not start the cell, so the
+  // no-separator tier must reject it.
+  const rows = [
+    { col_1: "จำนวนรวม 74" },
+    { col_1: "item A", col_5: 300 },
+  ];
+  const { score } = extractScoreFromRows(rows);
+  assert.equal(score, 300);
+});
+
+test("trailing text after the number blocks the no-separator tier", () => {
+  const rows = [
+    { col_1: "รวมแต้ม 30 วัน" },
+    { col_1: "item A", col_5: 300 },
+  ];
+  const { score } = extractScoreFromRows(rows);
+  assert.equal(score, 300);
+});
+
+test("bare year after a total label is rejected, but an explicit separator is honoured", () => {
+  // "รวม 2569" is almost certainly a date stamp. With an "=" the same number is
+  // a deliberate statement of the total, so it is accepted.
+  const bare = extractScoreFromRows([
+    { col_1: "รวม 2569" },
+    { col_1: "item A", col_5: 300 },
+  ]);
+  assert.equal(bare.score, 300);
+
+  const explicit = extractScoreFromRows([
+    { col_1: "รวม = 2569" },
+    { col_1: "item A", col_5: 300 },
+  ]);
+  assert.equal(explicit.score, 2569);
+  assert.match(explicit.method, /free-text summary/);
+});

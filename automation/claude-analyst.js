@@ -472,6 +472,63 @@ function numsFromText(val, skipYearFilter = false) {
     .filter((n) => !isNaN(n) && n > 0 && (skipYearFilter || !isYearLike(n)));
 }
 
+// ── Free-text summary lines ───────────────────────────────────────────────
+// Physicians sometimes type the month's totals as prose at the bottom of the
+// sheet ("รวม =  3260") instead of leaving them in numeric cells. Those cells
+// are invisible to every numeric pass below — toNum() on the whole string is
+// NaN — so the largest plain number elsewhere on the sheet wins instead (an
+// observed file reported 1320, a line-item weight, against a real total of
+// 3260).
+//
+// Matching is deliberately split in two, because the separator is what makes
+// a match safe:
+//   Tier A — "=" or ":" present: take the number right after it, anywhere in
+//     the cell. Year-like values are accepted here (the separator already
+//     proves intent, and a real total can land in the BE-year range, e.g.
+//     2607). The [^=:\d]* guard stops a year earlier in the cell from being
+//     read as the total: "สรุป มิย 2569 งานบริการ = 1940" yields nothing,
+//     since "สรุป" is not a total label.
+//   Tier B — no separator: the whole cell must be exactly <label><number>
+//     ("รวม  100"), and year-like values are rejected. Both guards are needed
+//     — without them "จำนวนรวม 74" (a count), "รวมแต้ม 30 วัน" and a bare
+//     "รวม 2569" all parse as scores.
+const SUMMARY_LABEL     = "(?:รวม|ผลรวม|คะแนนรวม|ยอดรวม)";
+const SUMMARY_WITH_SEP  = new RegExp(`${SUMMARY_LABEL}[^=:\\d]*[=:]\\s*([\\d,]+(?:\\.\\d+)?)`, "g");
+const SUMMARY_BARE      = new RegExp(`^${SUMMARY_LABEL}[^\\d]*?\\s+([\\d,]+(?:\\.\\d+)?)$`);
+
+/**
+ * Pull totals out of free-text cells. See the note above for why the two tiers
+ * differ in strictness.
+ * @param {object[]} rows
+ * @returns {number[]} every total stated in prose, in sheet order
+ */
+function summaryTextCandidates(rows) {
+  const results = [];
+  for (const row of rows) {
+    for (const val of Object.values(row)) {
+      if (typeof val !== "string") continue;
+      const s = val.replace(/\s+/g, " ").trim();
+      if (!s) continue;
+
+      // Tier A — separator present
+      const withSep = [...s.matchAll(SUMMARY_WITH_SEP)]
+        .map((m) => parseFloat(m[1].replace(/,/g, "")))
+        .filter((n) => !isNaN(n) && n > 0);
+      if (withSep.length > 0) {
+        results.push(...withSep);
+        continue;
+      }
+
+      // Tier B — label + number and nothing else
+      const bare = SUMMARY_BARE.exec(s);
+      if (!bare) continue;
+      const n = parseFloat(bare[1].replace(/,/g, ""));
+      if (!isNaN(n) && n > 0 && !isYearLike(n)) results.push(n);
+    }
+  }
+  return results;
+}
+
 /** Coerce any cell value to a number. Returns NaN if not numeric. */
 function toNum(val) {
   if (val === null || val === undefined || val === "") return NaN;
@@ -554,6 +611,15 @@ export function extractScoreFromRows(rows) {
   }
   if (grandCandidates.length > 0) {
     return { score: Math.max(...grandCandidates), method: "grand-total label row (all columns)" };
+  }
+
+  // Step 1b: free-text summary pass — totals typed as prose ("รวม =  3260")
+  // rather than left in numeric cells. Ranked above the sub-total pass: a
+  // stated total outranks any sub-total the numeric passes can reach, and the
+  // labels here are total labels, not line-item ones.
+  const summaryCandidates = summaryTextCandidates(rows);
+  if (summaryCandidates.length > 0) {
+    return { score: Math.max(...summaryCandidates), method: "free-text summary line" };
   }
 
   // Step 2: sub-total pass — search col_1/col_2/col_3 only.
