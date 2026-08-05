@@ -232,3 +232,53 @@ test("bare year after a total label is rejected, but an explicit separator is ho
   assert.equal(explicit.score, 2569);
   assert.match(explicit.method, /free-text summary/);
 });
+
+test("year-like total in the sheet's declared score column is read, not discarded", () => {
+  // Bug: isYearLike drops 1900–2099 wholesale, so a real total of 1940 sitting
+  // in the "รวมแต้ม" column was thrown away — leaving the count in the same row
+  // (74) as the only survivor. The header row declares which column holds the
+  // points, so on a labelled total row that value needs no year guessing.
+  const rows = [
+    { col_1: "ประเภทงาน", col_2: "กิจกรรม", col_3: "แต้ม", col_4: "จำนวนรวม", col_5: "รวมแต้ม", col_6: "D1" },
+    { col_2: "1. Plain film/ แผ่น", col_3: 2.5, col_4: 4, col_5: 10 },
+    { col_2: "รวม ", col_4: 74, col_5: 1940 },
+  ];
+  const { score } = extractScoreFromRows(rows);
+  assert.equal(score, 1940);
+});
+
+test("a data row is not mistaken for the header row when nominating the score column", () => {
+  // Only an all-text row can be a header. Were the first row (label + number)
+  // accepted, col_1 would be nominated as the score column, the total row's
+  // col_1 would read as text, and the answer would fall back to 50.
+  const rows = [
+    { col_1: "รวมแต้ม", col_2: 999, col_3: "หมายเหตุ" },
+    { col_1: "ประเภทงาน", col_2: "กิจกรรม", col_3: "รวมแต้ม" },
+    { col_1: "รวม", col_2: 50, col_3: 1980 },
+  ];
+  const { score } = extractScoreFromRows(rows);
+  assert.equal(score, 1980);
+});
+
+test("declared score column also settles the grand-total row", () => {
+  const rows = [
+    { col_1: "ประเภทงาน", col_2: "กิจกรรม", col_3: "แต้ม", col_4: "จำนวนรวม", col_5: "รวมแต้ม", col_6: "D1" },
+    { col_2: "item A", col_3: 10, col_5: 400 },
+    { col_1: "รวมแต้มทั้งหมด", col_3: 2568, col_5: 2050 },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 2050);           // not 2568 (a year), not 400
+  assert.match(method, /grand-total/);
+});
+
+test("sheets with no header row keep the previous behaviour", () => {
+  // No row declares a score column, so nothing changes: the year filter still
+  // governs, and the largest non-year number wins.
+  const rows = [
+    { col_1: "item A", col_5: 300 },
+    { col_1: "item B", col_5: 450 },
+  ];
+  const { score, method } = extractScoreFromRows(rows);
+  assert.equal(score, 450);
+  assert.match(method, /largest in sheet/);
+});
