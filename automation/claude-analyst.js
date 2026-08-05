@@ -562,6 +562,50 @@ function collectCandidates(rows, skipYearFilter = false) {
   return results;
 }
 
+// ── Declared score column ─────────────────────────────────────────────────
+// The standard P4P sheet declares its own total-points column in the header
+// row ("ประเภทงาน | กิจกรรม | แต้ม | จำนวนรวม | รวมแต้ม | D1…D31"). When that
+// header is present the guessing stops: a number sitting in the declared
+// column on a labelled total row IS the total, whatever it looks like. That
+// matters because isYearLike() discards 1900–2099 wholesale, so a real total
+// of e.g. 1940 was being thrown away and a line-item weight returned instead.
+const SCORE_COLUMN_LABELS = ["รวมแต้ม", "รวมคะแนน", "คะแนนรวม", "แต้มรวม"];
+
+/**
+ * Find the sheet's total-points column from its header row.
+ *
+ * A header row is identified by being entirely non-numeric — any numeric cell
+ * means the row is data, not a header. Without that check a grand-total row
+ * ("รวมแต้มทั้งหมด | 11011.5") would nominate its own label column, and the
+ * real total would then be read from the wrong place. The label must match a
+ * header exactly, not as a substring, for the same reason.
+ *
+ * @param {object[]} rows
+ * @returns {string|null} the column key (e.g. "col_5"), or null when the sheet
+ *   declares no such column — in which case every caller keeps its old behaviour.
+ */
+function findScoreColumn(rows) {
+  for (const row of rows) {
+    const entries = Object.entries(row)
+      .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "");
+    if (entries.length < 3) continue;
+    if (entries.some(([, v]) => !isNaN(toNum(v)))) continue;
+
+    const hit = entries.find(([, v]) =>
+      SCORE_COLUMN_LABELS.some((label) => stripSpace(String(v)) === stripSpace(label))
+    );
+    if (hit) return hit[0];
+  }
+  return null;
+}
+
+/** The declared-column value for a row, or NaN when there isn't a usable one. */
+function declaredScore(row, scoreCol) {
+  if (!scoreCol) return NaN;
+  const n = toNum(row[scoreCol]);
+  return !isNaN(n) && n > 0 ? n : NaN;
+}
+
 /**
  * Try keyword label row first, then fall back to the largest valid number
  * in the entire sheet.
@@ -581,6 +625,9 @@ export function extractScoreFromRows(rows) {
     return { score: null, method: "no rows" };
   }
 
+  // Which column the sheet itself calls the total-points column (null if none).
+  const scoreCol = findScoreColumn(rows);
+
   // Step 1: grand-total pass — search ALL columns for grand-total specific labels.
   // These keywords only appear in grand-total rows, never as column headers.
   const grandCandidates = [];
@@ -590,6 +637,13 @@ export function extractScoreFromRows(rows) {
       GRAND_TOTAL_LABELS.some((label) => includesLabel(s, label))
     );
     if (labelCells.length > 0) {
+      // The declared column wins outright when the sheet has one: no year
+      // filter, no Math.max across unrelated cells in the row.
+      const declared = declaredScore(row, scoreCol);
+      if (!isNaN(declared)) {
+        grandCandidates.push(declared);
+        continue;
+      }
       // Prefer non-year-like candidates first: a confirmed grand-total row can
       // still contain an unrelated year reference in another cell (e.g. a
       // "ปี 2568" note sharing the row), and blindly allowing year-like values
@@ -633,6 +687,15 @@ export function extractScoreFromRows(rows) {
       SUBTOTAL_LABELS.some((label) => includesLabel(s, label))
     );
     if (hasLabel) {
+      // Same as the grand-total pass: the declared column beats guessing.
+      // A sub-total row often carries a count alongside the points (e.g.
+      // "รวม | 74 | 1940"), and with the year filter dropping 1940 the count
+      // was the only survivor.
+      const declared = declaredScore(row, scoreCol);
+      if (!isNaN(declared)) {
+        subCandidates.push(declared);
+        continue;
+      }
       const nums = collectCandidates([row]);
       subCandidates.push(...nums);
     }
