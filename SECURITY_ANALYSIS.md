@@ -350,11 +350,19 @@ all `active`.
 
 ## 4. Priority summary
 
+**Status: items 1 and 3 were applied to production on 2026-08-07 13:42 UTC**
+via `scripts/security-hardening-2026-08.sql` (Blocks 1, 2, 3, 5, 6, 7; Block 4
+held back pending an automation run). Verified after: anon-executable
+`SECURITY DEFINER` functions dropped from 10 to 4 — the four being the
+intentional pre-login surface — anon/public RLS policies went 3 → 0, and a live
+canary confirmed new tables/functions/roster tables come out with zero anon
+access while still getting the 4 `authenticated` column grants.
+
 | # | Action | Area | Effort | Impact |
 |---|---|---|---|---|
-| 1 | Event trigger stripping anon grants on new objects **+** re-revoke the existing functions (not `alter default privileges` alone — see §2 P1) | Rate limit | S | **Critical** |
+| ~~1~~ | ~~Event trigger stripping anon grants on new objects **+** re-revoke the existing functions~~ **DONE** | Rate limit | S | **Critical** |
 | 2 | Stop `list_all_physicians()` returning 250 names to `anon` | Rate limit | M | **High** |
-| 3 | Drop the two stale `p4p_submissions` anon policies + the `fetch` table | Rate limit | XS | **High** |
+| ~~3~~ | ~~Drop the two stale `p4p_submissions` anon policies~~ **DONE** (the `fetch` table itself still exists; its wide-open policy is gone) | Rate limit | XS | **High** |
 | 4 | Enforce LINE `userId` **match** as a second factor | MFA | M | **High** |
 | 5 | `auth_events` audit table | Anomaly | M | **High** |
 | 6 | Expire sessions (Supabase timeout + cookie `Max-Age`) | MFA | S | High |

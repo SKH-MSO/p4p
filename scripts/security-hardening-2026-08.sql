@@ -1,8 +1,11 @@
 -- ============================================================================
 --  P4P — Security hardening, August 2026  (REVISION 2)
 -- ============================================================================
---  ⚠️  NOT YET APPLIED. Test on a Supabase BRANCH first — see Block 0.
---      Evidence for each block: SECURITY_ANALYSIS.md
+--  ✅ APPLIED to production 2026-08-07 13:42 UTC — Blocks 1, 2, 3, 5, 6, 7.
+--     Block 4 (assert_service_role) was deliberately HELD BACK until the
+--     automation is confirmed working; see the note on that block.
+--     Post-apply verification is recorded under "Applied results" below.
+--     Evidence for each block: SECURITY_ANALYSIS.md
 --
 --  WHY REVISION 2
 --  --------------
@@ -114,6 +117,34 @@
 --  four columns, i.e. the alphabetical firing order works and /status /list
 --  /ranking will not 401.
 --
+--  APPLIED RESULTS (production, 2026-08-07 13:42 UTC)
+--  ---------------------------------------------------
+--    anon-executable SECURITY DEFINER functions: 10 -> 4
+--      remaining, all intentional (the pre-login surface):
+--        is_sender_allowlisted, log_access_request,
+--        get_line_bind_gate_status, list_all_physicians
+--      removed: provision_month, approve_access_request,
+--        reject_access_request, rls_auto_enable, notify_access_request,
+--        bind_line_user_id, record_bind_failure, is_current_user_allowlisted
+--    anon/public RLS policies in public ......... 0   (was 3)
+--    p4p_submissions policies ................... 1   (was 3)
+--    anon table grants .......................... 0
+--    anon column grants ......................... 0
+--    authenticated SELECT column grants ......... 52  (12 rosters x 4 + 4)
+--    anon TRUNCATE on email_sent_log ............ false
+--    approve_token default ...................... gen_random_bytes(16) hex
+--    default ACL (postgres, functions) .......... postgres, service_role only
+--    default ACL (postgres, tables) ............. postgres, service_role only
+--
+--  Live canary run after the apply (rolled back): a new function, a new plain
+--  table and a new roster table all came out with zero anon access, and the
+--  roster table still received exactly 4 authenticated column grants with RLS
+--  on and 1 policy — i.e. next month's provision_month() run is unaffected.
+--
+--  Data untouched: physician_directory 207, p4p_submissions 805,
+--  2569_08 216 rows, 0 leftover canary objects. Existing approve_tokens were
+--  NOT rotated, so Telegram buttons already sent still work.
+--
 --  STILL UNTESTED HERE: whether auth.role() is populated for this project's
 --  NEW-format API keys (sb_publishable_… / sb_secret_…) over a real PostgREST
 --  request. T11-T13 simulate the claims with set_config, which is not the same
@@ -216,6 +247,16 @@ drop event trigger if exists trg_revoke_public_grants;
 create event trigger trg_revoke_public_grants on ddl_command_end
   when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO', 'CREATE FUNCTION')
   execute function public.revoke_public_grants();
+
+-- The trigger cannot protect its OWN function: revoke_public_grants() is
+-- created before the event trigger exists, and the Block 1 default-privileges
+-- change does not take effect for objects created in the SAME transaction as
+-- that change (observed on the live apply — the function came out with
+-- `=X/postgres`, i.e. PUBLIC EXECUTE, despite Block 1 running first).
+-- Revoke on it explicitly. Not exploitable either way — calling it outside an
+-- event-trigger context errors on pg_event_trigger_ddl_commands() — but it
+-- would otherwise show up as an anon-executable function in the advisor.
+revoke all on function public.revoke_public_grants() from public, anon, authenticated;
 
 
 -- ----------------------------------------------------------------------------
