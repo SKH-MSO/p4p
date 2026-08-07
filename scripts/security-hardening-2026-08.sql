@@ -51,6 +51,28 @@
 --     would never get approved and nobody would know why.
 --     => Block 7 changes only the DEFAULT for future rows.
 --
+--   R2-BUG-4 (found by ACTUALLY RUNNING IT — see "Dry-run results" below).
+--     Revision 2 revoked `from anon, authenticated`. That is still not enough.
+--     PostgreSQL itself grants EXECUTE to **PUBLIC** on every newly created
+--     function — nothing to do with Supabase — and `has_function_privilege
+--     ('anon', ..., 'EXECUTE')` returns true through PUBLIC. Observed ACL on a
+--     freshly created function after revoking from anon+authenticated:
+--
+--         =X/postgres , postgres=X/postgres , service_role=X/postgres
+--          ^^^^^^^^^^ empty grantee = PUBLIC = still reachable by anon
+--
+--     So there are TWO independent sources of anon EXECUTE, and a correct fix
+--     must remove both:
+--       (a) Postgres's built-in grant to PUBLIC   -> revoke ... from public
+--       (b) Supabase's default privileges to anon -> revoke ... from anon, authenticated
+--     The original repo scripts did (a) and missed (b); revision 2 did (b) and
+--     missed (a). Every revoke below now does BOTH.
+--
+--     This also means revision 2's Block 3 would have silently failed for
+--     rls_auto_enable, secure_new_roster and notify_access_request, which still
+--     carry the PUBLIC grant in production. Verified: with `from public` added,
+--     all three now come back false.
+--
 --  WHAT THIS FILE STILL DOES NOT FIX
 --  ---------------------------------
 --  The single largest data exposure — list_all_physicians() returning all 250
@@ -59,6 +81,44 @@
 --  it pre-login. See Appendix B.
 --
 --  Idempotent. Ordered so nothing is left half-open between blocks.
+--
+--  DRY-RUN RESULTS (2026-08, against the REAL production schema)
+--  -------------------------------------------------------------
+--  Supabase branching requires the Pro plan and this org is on Free, so this
+--  was executed against production inside an explicit transaction that was
+--  guaranteed to roll back (a terminating RAISE, so even a partial failure
+--  aborts). Rollback was verified beforehand with a throwaway table, and
+--  production was re-checked afterwards: 0 leftover objects, the stale
+--  p4p_submissions policies still present, anon grants unchanged. Nothing was
+--  applied.
+--
+--    T1  provision_month          anon EXECUTE ....... false  ✓
+--    T2  approve_access_request   anon EXECUTE ....... false  ✓
+--    T2b rls_auto_enable          anon EXECUTE ....... false  ✓ (needed `public`)
+--    T2c notify_access_request    anon EXECUTE ....... false  ✓ (needed `public`)
+--    T3  provision_month     service_role EXECUTE ... true   ✓ automation intact
+--    T4  get_line_bind_gate_status anon EXECUTE ..... true   ✓ deliberately kept
+--    T4b is_sender_allowlisted   anon EXECUTE ....... true   ✓ login intact
+--    T5  NEW function            anon EXECUTE ....... false  ✓ (needed `public`)
+--    T6  NEW table               anon SELECT ........ false  ✓
+--    T7  new roster table  authenticated SELECT cols  4      ✓ ORDERING OK
+--    T8  new roster table        anon SELECT ........ false  ✓
+--    T9  new roster table        policies ........... 1      ✓
+--    T10 p4p_submissions         policies ........... 1      ✓ stale ones gone
+--    T11 assert_service_role, claim role=anon ....... BLOCKED ✓
+--    T12 assert_service_role, claim role=service_role ALLOWED ✓
+--    T13 assert_service_role, no claim (psql) ....... ALLOWED ✓
+--
+--  T7 is the regression that matters most: it proves trg_revoke_public_grants
+--  strips the new roster table and trg_secure_new_roster then re-grants the
+--  four columns, i.e. the alphabetical firing order works and /status /list
+--  /ranking will not 401.
+--
+--  STILL UNTESTED HERE: whether auth.role() is populated for this project's
+--  NEW-format API keys (sb_publishable_… / sb_secret_…) over a real PostgREST
+--  request. T11-T13 simulate the claims with set_config, which is not the same
+--  thing. Confirm provision-next-month.mjs still succeeds after applying
+--  Block 4, or drop Block 4 and rely on the grants alone.
 -- ============================================================================
 
 
@@ -97,9 +157,11 @@ begin;
 --   Covers all three object types, not just functions. Note that this changes
 --   FUTURE objects only — Blocks 3 and 6 fix the existing ones.
 -- ----------------------------------------------------------------------------
-alter default privileges in schema public revoke execute on functions  from anon, authenticated;
-alter default privileges in schema public revoke all     on tables     from anon, authenticated;
-alter default privileges in schema public revoke all     on sequences  from anon, authenticated;
+-- `public` is NOT redundant here — see R2-BUG-4. Postgres grants EXECUTE to
+-- PUBLIC on new functions independently of Supabase's anon/authenticated grants.
+alter default privileges in schema public revoke execute on functions  from public, anon, authenticated;
+alter default privileges in schema public revoke all     on tables     from public, anon, authenticated;
+alter default privileges in schema public revoke all     on sequences  from public, anon, authenticated;
 
 -- The matching `supabase_admin` entries cannot be altered from here (postgres
 -- is not a member of that role). Block 2 is what actually covers them.
@@ -136,10 +198,12 @@ begin
       and command_tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO', 'CREATE FUNCTION')
   loop
     begin
+      -- `public` is load-bearing (R2-BUG-4): without it a new function keeps
+      -- Postgres's built-in PUBLIC EXECUTE grant and anon still reaches it.
       if r.command_tag = 'CREATE FUNCTION' then
-        execute format('revoke all on function %s from anon, authenticated;', r.object_identity);
+        execute format('revoke all on function %s from public, anon, authenticated;', r.object_identity);
       else
-        execute format('revoke all on table %s from anon, authenticated;', r.object_identity);
+        execute format('revoke all on table %s from public, anon, authenticated;', r.object_identity);
       end if;
     exception when others then
       -- Never block a DDL statement because of this; surface it instead.
@@ -181,15 +245,18 @@ create event trigger trg_revoke_public_grants on ddl_command_end
 --                                  only ever called by an authenticated client,
 --                                  so anon has no business reaching them.
 -- ----------------------------------------------------------------------------
-revoke execute on function public.provision_month(text, text)          from anon, authenticated;
-revoke execute on function public.approve_access_request(text)         from anon, authenticated;
-revoke execute on function public.reject_access_request(text)          from anon, authenticated;
-revoke execute on function public.rls_auto_enable()                    from anon, authenticated;
-revoke execute on function public.secure_new_roster()                  from anon, authenticated;
-revoke execute on function public.notify_access_request()              from anon, authenticated;
-revoke execute on function public.bind_line_user_id(text, text)        from anon;
-revoke execute on function public.record_bind_failure()                from anon;
-revoke execute on function public.is_current_user_allowlisted()        from anon;
+-- NOTE the `public,` prefix on every line (R2-BUG-4). Verified: without it,
+-- rls_auto_enable / secure_new_roster / notify_access_request stay anon-callable
+-- because they still carry Postgres's built-in PUBLIC EXECUTE grant.
+revoke all on function public.provision_month(text, text)          from public, anon, authenticated;
+revoke all on function public.approve_access_request(text)         from public, anon, authenticated;
+revoke all on function public.reject_access_request(text)          from public, anon, authenticated;
+revoke all on function public.rls_auto_enable()                    from public, anon, authenticated;
+revoke all on function public.secure_new_roster()                  from public, anon, authenticated;
+revoke all on function public.notify_access_request()              from public, anon, authenticated;
+revoke all on function public.bind_line_user_id(text, text)        from public, anon;
+revoke all on function public.record_bind_failure()                from public, anon;
+revoke all on function public.is_current_user_allowlisted()        from public, anon;
 
 -- Re-assert the intended grants (revoking from a role the function was granted
 -- to via default privileges does not disturb service_role's own grant, but
@@ -199,6 +266,14 @@ grant execute on function public.approve_access_request(text)  to service_role;
 grant execute on function public.reject_access_request(text)   to service_role;
 grant execute on function public.bind_line_user_id(text, text) to authenticated;
 grant execute on function public.record_bind_failure()         to authenticated;
+
+-- The pre-login surface. These MUST keep anon EXECUTE or /verify/ breaks;
+-- stated explicitly so the intent survives Block 2's event trigger if any of
+-- them is ever recreated with CREATE OR REPLACE.
+grant execute on function public.is_sender_allowlisted(text)      to anon, authenticated;
+grant execute on function public.log_access_request(text, text)   to anon, authenticated;
+grant execute on function public.list_all_physicians()            to anon, authenticated;  -- see Appendix B
+grant execute on function public.get_line_bind_gate_status(text)  to anon, authenticated;  -- see Appendix A
 
 
 -- ----------------------------------------------------------------------------
