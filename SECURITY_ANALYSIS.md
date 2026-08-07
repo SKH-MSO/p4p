@@ -188,8 +188,14 @@ does not exist.
 
 **2d. Email enumeration oracles.** `is_sender_allowlisted` and
 `get_line_bind_gate_status` are `anon`-callable and unmetered — yes/no oracles
-over a 207-row directory. `main.js:198` calls the latter only *after* a valid
-session exists, so its `anon` grant is unnecessary.
+over a 207-row directory. Note that `get_line_bind_gate_status` **cannot simply
+be revoked**: `main.js:152` calls it with the anon key as both `apikey` and
+`Bearer`, not with the user's token, and the failure path (`main.js:155`)
+returns `null`, which makes `main.js:199` skip the gate — *including the
+`blocked_emails` denylist*. Revoking it would silently disable revocation.
+`main.js` must be changed to pass the user's token (`at`, already in scope)
+first. Same for the fail-open itself: failing open on the bind requirement is
+defensible; failing open on the denylist is not.
 
 **2e. OTP spam / junk accounts — hook confirmed absent.**
 `restrict_signups_to_allowlist` **does not exist** in `pg_proc`, so the
@@ -233,15 +239,17 @@ every unauthenticated hit.
 
 ### Recommendations
 
-- **P1 — Fix the default privileges, then re-revoke.** Both halves are needed:
-  ```sql
-  alter default privileges in schema public revoke execute on functions from anon, authenticated;
-  revoke execute on function public.provision_month(text,text)      from anon, authenticated;
-  revoke execute on function public.approve_access_request(text)    from anon, authenticated;
-  revoke execute on function public.reject_access_request(text)     from anon, authenticated;
-  revoke execute on function public.get_line_bind_gate_status(text) from anon;
-  ```
-  Without the first line the problem returns on the next `create function`.
+- **P1 — Fix the root cause, but not with `alter default privileges` alone.**
+  That statement only edits the *executing role's* entry, and this project has
+  two (`postgres` and `supabase_admin`) across functions, tables **and**
+  sequences. The `supabase_admin` entry — which grants `anon` full CRUD
+  (`arwdDxtm`) on new tables — cannot be altered from the SQL editor at all,
+  because `postgres` is not a member of `supabase_admin` (verified via
+  `pg_auth_members`). Since this project creates a roster table every month,
+  the durable fix is an **event trigger** that strips `anon`/`authenticated`
+  from every new object in `public` regardless of creator, ordered to fire
+  before `trg_secure_new_roster` re-grants the four roster columns. Then revoke
+  on the existing functions. See `scripts/security-hardening-2026-08.sql`.
 - **P2 — Stop leaking 250 names.** Replace the `anon` dropdown feed: either
   gate `list_all_physicians()` behind a submitted email that already passed
   `is_sender_allowlisted`, return a department-scoped subset, or drop the
@@ -344,7 +352,7 @@ all `active`.
 
 | # | Action | Area | Effort | Impact |
 |---|---|---|---|---|
-| 1 | `alter default privileges ... revoke execute ... from anon` **+** re-revoke the 4 functions | Rate limit | S | **Critical** |
+| 1 | Event trigger stripping anon grants on new objects **+** re-revoke the existing functions (not `alter default privileges` alone — see §2 P1) | Rate limit | S | **Critical** |
 | 2 | Stop `list_all_physicians()` returning 250 names to `anon` | Rate limit | M | **High** |
 | 3 | Drop the two stale `p4p_submissions` anon policies + the `fetch` table | Rate limit | XS | **High** |
 | 4 | Enforce LINE `userId` **match** as a second factor | MFA | M | **High** |

@@ -1,153 +1,430 @@
 -- ============================================================================
---  P4P — Security hardening, August 2026
+--  P4P — Security hardening, August 2026  (REVISION 2)
 -- ============================================================================
---  ⚠️  NOT YET APPLIED to the live project. Review, then run in the Supabase
---      SQL editor. See SECURITY_ANALYSIS.md for the evidence behind each block.
+--  ⚠️  NOT YET APPLIED. Test on a Supabase BRANCH first — see Block 0.
+--      Evidence for each block: SECURITY_ANALYSIS.md
 --
---  WHY THIS FILE EXISTS
---  --------------------
---  Every earlier script used the pattern:
+--  WHY REVISION 2
+--  --------------
+--  Revision 1 of this file was reviewed and had three defects. They are worth
+--  recording, because two of them are the same class of mistake that caused
+--  the original incident — assuming a statement did what it looked like it did.
 --
---      revoke all on function public.f(...) from public;
---      grant execute on function public.f(...) to service_role;
+--   R1-BUG-1 (would have REDUCED security). It contained
+--     `revoke execute on function public.get_line_bind_gate_status(text) from anon;`
+--     But main.js:152 calls that RPC with the ANON key as both apikey and
+--     Bearer — not with the user's token. Revoking it returns 403, which
+--     getLineBindGateStatus() catches and converts to `null` (main.js:155),
+--     and main.js:199 `if (gate)` then skips the whole gate — including the
+--     `blocked_emails` denylist check. The fail-open is deliberate and
+--     documented (main.js:143-146), so this would have silently disabled the
+--     ONLY access-revocation mechanism in the system, with no error and no log.
+--     => That revoke is REMOVED here. It can only happen after main.js is
+--        changed to call the RPC with the user's access token (which it already
+--        has in scope as `at`). See Appendix A.
 --
---  That pattern DOES NOT WORK on Supabase. The project has:
+--   R1-BUG-2 (incomplete root-cause fix). It ran
+--     `alter default privileges in schema public revoke execute on functions
+--      from anon, authenticated;`
+--     ALTER DEFAULT PRIVILEGES without FOR ROLE only edits the executing role's
+--     own entry. This project has TWO entries in schema public — one owned by
+--     `postgres`, one by `supabase_admin` — and it also has entries for TABLES
+--     and SEQUENCES, which R1 ignored entirely:
 --
---      alter default privileges in schema public
---        grant execute on functions to anon, authenticated, service_role;
+--       grantor=postgres        objtype=r  anon=Dxtm        (TRUNCATE etc.)
+--       grantor=supabase_admin  objtype=r  anon=arwdDxtm    (FULL CRUD)
+--       grantor=supabase_admin  objtype=S  anon=rwU
 --
---  so every newly created function gets an EXPLICIT `anon=X` grant.
---  `revoke ... from public` removes only the PUBLIC pseudo-role grant and
---  leaves that explicit anon grant untouched. Verified on the live project:
---  all 13 public functions are anon-executable, including provision_month()
---  and approve_access_request(), both of which the scripts believed were
---  service_role-only.
+--     The supabase_admin entry CANNOT be fixed from the SQL editor: postgres is
+--     not a member of supabase_admin (verified against pg_auth_members), so
+--     `alter default privileges for role supabase_admin ...` raises
+--     "must be member of role". A table created in public by supabase_admin
+--     therefore still lands with FULL anon CRUD, and this project creates a new
+--     roster table every month.
+--     => Block 1 fixes what it can; Block 2 adds an event trigger that closes
+--        the rest by construction, for BOTH grantors.
 --
---  Block 1 fixes the root cause. Blocks 2-4 clean up what it let through.
---  Idempotent — safe to re-run.
+--   R1-BUG-3 (operational breakage). It rotated approve_token for every
+--     unresolved access request. Those tokens are embedded in Telegram messages
+--     ALREADY SENT to the admin. Rotating them makes the ✅/❌ buttons on those
+--     messages fail with "not found", so the 4 currently-pending physicians
+--     would never get approved and nobody would know why.
+--     => Block 7 changes only the DEFAULT for future rows.
+--
+--  WHAT THIS FILE STILL DOES NOT FIX
+--  ---------------------------------
+--  The single largest data exposure — list_all_physicians() returning all 250
+--  physician names to any unauthenticated caller — is an APPLICATION change,
+--  not a grant change. It cannot be revoked, because /verify/ genuinely calls
+--  it pre-login. See Appendix B.
+--
+--  Idempotent. Ordered so nothing is left half-open between blocks.
 -- ============================================================================
 
 
 -- ----------------------------------------------------------------------------
--- Block 1 — ROOT CAUSE: stop auto-granting EXECUTE on new functions to anon.
+-- Block 0 — TEST THIS ON A BRANCH, NOT PRODUCTION.
 --
---   Must run as the role that owns the default-privileges entry (postgres).
---   Without this, every future `create function` re-opens the same hole and
---   Blocks 2-3 below silently regress.
+--   Every migration in this project so far went straight to production, which
+--   is precisely how the ineffective `revoke ... from public` statements went
+--   unnoticed for months: they ran without error and were never verified.
 --
---   NOTE: this changes only FUTURE functions. Block 2 fixes existing ones.
+--   Supabase branching (or a throwaway project) gives a real check:
+--     1. Create a branch of the project.
+--     2. Run this file there.
+--     3. Run Block 8's verification queries.
+--     4. Hit the branch with the PUBLISHABLE key and confirm, over HTTP, that
+--        each revoked RPC now returns 401/403 (the catalog says what SHOULD
+--        happen; only an HTTP probe proves what DOES). Minimum set:
+--          POST /rest/v1/rpc/provision_month          -> expect 401/403
+--          POST /rest/v1/rpc/approve_access_request   -> expect 401/403
+--          POST /rest/v1/rpc/is_sender_allowlisted    -> expect 200 (still needed)
+--          POST /rest/v1/rpc/get_line_bind_gate_status-> expect 200 (still needed)
+--     5. Load /status/ against the branch and confirm the pages still render
+--        and the bind gate still redirects — that is the regression R1-BUG-1
+--        would have caused.
+--   Only then apply to production.
 -- ----------------------------------------------------------------------------
-alter default privileges in schema public
-  revoke execute on functions from anon, authenticated;
 
-
--- ----------------------------------------------------------------------------
--- Block 2 — Revoke EXECUTE that should never have been reachable.
---
---   These four are called ONLY by the server (Vercel, service_role) or by a
---   GitHub Action. No browser client calls them, so revoking anon +
---   authenticated breaks nothing.
---
---   provision_month           — creates a roster table + copies ~200 rows.
---                               anon-callable = unauthenticated table creation
---                               across 3,612 valid YYYY_MM keys.
---   approve/reject_access_req — writes into physician_directory, i.e. the
---                               login allow-list itself.
---   rls_auto_enable           — event-trigger body, never called directly.
--- ----------------------------------------------------------------------------
-revoke execute on function public.provision_month(text, text)   from anon, authenticated;
-revoke execute on function public.approve_access_request(text)  from anon, authenticated;
-revoke execute on function public.reject_access_request(text)   from anon, authenticated;
-revoke execute on function public.rls_auto_enable()             from anon, authenticated;
-
--- Called by main.js only AFTER a valid session exists (servePage -> the gate
--- check), so `authenticated` is sufficient; the anon grant was never needed
--- and doubles as an email-enumeration oracle.
-revoke execute on function public.get_line_bind_gate_status(text) from anon;
-
--- Trigger function — invoked by trg_notify_access_request, never by a client.
-revoke execute on function public.notify_access_request() from anon, authenticated;
+begin;
 
 
 -- ----------------------------------------------------------------------------
--- Block 3 — Remove stale permissive policies on p4p_submissions (797 rows).
+-- Block 1 — Root cause, part 1: stop auto-granting to anon/authenticated on
+--           objects created by `postgres` (the SQL editor's role, and the owner
+--           of every object this project has created so far).
 --
---   Two undocumented policies are live and are NOT in any repo script (added
---   via the dashboard). They are inert today only because anon happens to lack
---   a SELECT grant — but RLS policies are OR'd, so the moment any grant appears
---   (or the table is recreated by supabase_admin, whose default table ACL is
---   anon=arwdDxtm) they override the authenticated-only policy entirely.
+--   Covers all three object types, not just functions. Note that this changes
+--   FUTURE objects only — Blocks 3 and 6 fix the existing ones.
+-- ----------------------------------------------------------------------------
+alter default privileges in schema public revoke execute on functions  from anon, authenticated;
+alter default privileges in schema public revoke all     on tables     from anon, authenticated;
+alter default privileges in schema public revoke all     on sequences  from anon, authenticated;
+
+-- The matching `supabase_admin` entries cannot be altered from here (postgres
+-- is not a member of that role). Block 2 is what actually covers them.
+
+
+-- ----------------------------------------------------------------------------
+-- Block 2 — Root cause, part 2: an event trigger that strips anon/authenticated
+--           privileges from every new table/function in `public`, whoever
+--           creates it.
+--
+--   This is the durable control. Grants are a single point of failure and this
+--   project has already had them fail silently once; an event trigger closes
+--   the hole by construction for both grantors and for objects created through
+--   the dashboard, the SQL editor, or the API.
+--
+--   NAMING IS LOad-BEARING: event triggers fire in alphabetical order at
+--   ddl_command_end. `trg_revoke_public_grants` sorts BEFORE the existing
+--   `trg_secure_new_roster`, so this strips everything first and
+--   trg_secure_new_roster then re-grants exactly the four roster columns
+--   `authenticated` needs. Renaming this trigger to sort after that one would
+--   break the /status /list /ranking pages with 401s.
+-- ----------------------------------------------------------------------------
+create or replace function public.revoke_public_grants()
+returns event_trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare r record;
+begin
+  for r in
+    select * from pg_event_trigger_ddl_commands()
+    where schema_name = 'public'
+      and command_tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO', 'CREATE FUNCTION')
+  loop
+    begin
+      if r.command_tag = 'CREATE FUNCTION' then
+        execute format('revoke all on function %s from anon, authenticated;', r.object_identity);
+      else
+        execute format('revoke all on table %s from anon, authenticated;', r.object_identity);
+      end if;
+    exception when others then
+      -- Never block a DDL statement because of this; surface it instead.
+      raise warning 'revoke_public_grants: failed on % (%): %', r.object_identity, r.command_tag, sqlerrm;
+    end;
+  end loop;
+end $$;
+
+drop event trigger if exists trg_revoke_public_grants;
+create event trigger trg_revoke_public_grants on ddl_command_end
+  when tag in ('CREATE TABLE', 'CREATE TABLE AS', 'SELECT INTO', 'CREATE FUNCTION')
+  execute function public.revoke_public_grants();
+
+
+-- ----------------------------------------------------------------------------
+-- Block 3 — Revoke EXECUTE on functions no browser client ever calls.
+--
+--   Verified callers before revoking (this is the check R1 skipped):
+--     provision_month          -> automation/scripts/provision-next-month.mjs,
+--                                 which requires SUPABASE_KEY to be the
+--                                 service_role key (line 76). SAFE.
+--     approve/reject_access_request -> main.js /telegram/webhook, using
+--                                 SUPABASE_SERVICE_ROLE_KEY (main.js:316). SAFE.
+--     rls_auto_enable, secure_new_roster, notify_access_request
+--                              -> event-trigger / trigger bodies, never called
+--                                 over HTTP. SAFE.
+--
+--   NOT revoked, and why:
+--     get_line_bind_gate_status -> called by main.js WITH THE ANON KEY. See
+--                                  R1-BUG-1 above and Appendix A.
+--     is_sender_allowlisted     -> called by verify/app.js:394 pre-login.
+--     log_access_request        -> called by verify/app.js:492 pre-login.
+--     list_all_physicians       -> called by verify/app.js:254 pre-login.
+--                                  This one is a real leak; Appendix B.
+--     bind_line_user_id, record_bind_failure, is_current_user_allowlisted
+--                               -> harmless to anon (they read
+--                                  auth.jwt()->>'email', which is null, and
+--                                  return early), but revoked anyway: they are
+--                                  only ever called by an authenticated client,
+--                                  so anon has no business reaching them.
+-- ----------------------------------------------------------------------------
+revoke execute on function public.provision_month(text, text)          from anon, authenticated;
+revoke execute on function public.approve_access_request(text)         from anon, authenticated;
+revoke execute on function public.reject_access_request(text)          from anon, authenticated;
+revoke execute on function public.rls_auto_enable()                    from anon, authenticated;
+revoke execute on function public.secure_new_roster()                  from anon, authenticated;
+revoke execute on function public.notify_access_request()              from anon, authenticated;
+revoke execute on function public.bind_line_user_id(text, text)        from anon;
+revoke execute on function public.record_bind_failure()                from anon;
+revoke execute on function public.is_current_user_allowlisted()        from anon;
+
+-- Re-assert the intended grants (revoking from a role the function was granted
+-- to via default privileges does not disturb service_role's own grant, but
+-- being explicit makes the intent auditable).
+grant execute on function public.provision_month(text, text)   to service_role;
+grant execute on function public.approve_access_request(text)  to service_role;
+grant execute on function public.reject_access_request(text)   to service_role;
+grant execute on function public.bind_line_user_id(text, text) to authenticated;
+grant execute on function public.record_bind_failure()         to authenticated;
+
+
+-- ----------------------------------------------------------------------------
+-- Block 4 — Defense in depth: assert the caller's role INSIDE the privileged
+--           functions, so a future grant mistake cannot expose them again.
+--
+--   The entire incident behind this file is "a grant was supposed to protect
+--   this and silently didn't". Fixing the grant alone recreates the same single
+--   point of failure. An in-body assertion means the function is safe even when
+--   the grant is wrong.
+--
+--   ⚠️  VERIFY ON THE BRANCH. auth.role() reads request.jwt.claims ->> 'role',
+--       which PostgREST populates. This project uses the NEW Supabase API key
+--       format (sb_publishable_… / sb_secret_…); confirm on the branch that a
+--       service_role call still yields 'service_role' here before applying to
+--       production, and that provision-next-month.mjs still succeeds. If the
+--       claim is absent for your key type, this guard would lock the automation
+--       out — which is why Block 0 exists.
+-- ----------------------------------------------------------------------------
+create or replace function public.assert_service_role()
+returns void
+language plpgsql
+stable
+set search_path = public
+as $$
+begin
+  -- auth.role() is null for a direct (non-PostgREST) connection such as the
+  -- SQL editor or a psql session, which we allow — those are already
+  -- superuser-adjacent paths.
+  if auth.role() is not null and auth.role() <> 'service_role' then
+    raise exception 'forbidden: this function is service_role only (caller role: %)', auth.role()
+      using errcode = '42501';
+  end if;
+end $$;
+
+revoke all on function public.assert_service_role() from public, anon, authenticated;
+
+-- Wire the guard into the three functions that perform privileged writes.
+-- Bodies are otherwise unchanged from their current definitions; only the
+-- first statement is added. (approve/reject shown; provision_month is long —
+-- add `perform public.assert_service_role();` as its first statement too.)
+create or replace function public.approve_access_request(p_token text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.access_requests%rowtype;
+begin
+  perform public.assert_service_role();
+
+  select * into v_row from public.access_requests where approve_token = p_token and not resolved;
+  if not found then
+    return false;
+  end if;
+
+  insert into public.physician_directory (email, full_name)
+  values (v_row.email, v_row.name)
+  on conflict (email) do update
+    set full_name = coalesce(excluded.full_name, public.physician_directory.full_name),
+        active    = true;
+
+  update public.access_requests set resolved = true where approve_token = p_token;
+  return true;
+end;
+$$;
+
+create or replace function public.reject_access_request(p_token text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform public.assert_service_role();
+  update public.access_requests set resolved = true where approve_token = p_token and not resolved;
+  return found;
+end;
+$$;
+
+-- The event trigger in Block 2 fires on these CREATE OR REPLACEs and strips
+-- anon/authenticated again, but re-assert service_role explicitly:
+grant execute on function public.approve_access_request(text) to service_role;
+grant execute on function public.reject_access_request(text)  to service_role;
+
+
+-- ----------------------------------------------------------------------------
+-- Block 5 — Remove stale permissive policies on p4p_submissions (797 rows).
+--
+--   Two undocumented policies are live and appear in NO repo script (added via
+--   the dashboard). They are inert today only because anon lacks a SELECT
+--   grant — but RLS policies are OR'd, so any future grant, or a table
+--   recreated by supabase_admin (default ACL anon=arwdDxtm), turns them into a
+--   full public dump of every submission record.
 -- ----------------------------------------------------------------------------
 drop policy if exists "allow anon read" on public.p4p_submissions;
 drop policy if exists "anon read only"  on public.p4p_submissions;
 
--- Belt and braces: the only policy that should remain is the allow-listed one.
-do $$
-declare n int;
-begin
-  select count(*) into n
-  from pg_policies
-  where schemaname = 'public' and tablename = 'p4p_submissions';
-  if n <> 1 then
-    raise warning 'p4p_submissions has % policies after cleanup (expected 1) — review manually', n;
-  end if;
-end $$;
-
 
 -- ----------------------------------------------------------------------------
--- Block 4 — Leftover table privileges from the same default-privileges leak.
---
---   anon/authenticated hold TRUNCATE (+ REFERENCES/TRIGGER) on these two.
---   Not reachable through PostgREST, but TRUNCATE ignores RLS entirely, so
---   there is no reason to leave it granted.
+-- Block 6 — Existing table privileges left behind by the default-privileges
+--           leak. anon currently holds TRUNCATE on both of these; TRUNCATE
+--           ignores RLS entirely.
 --
 --   public.fetch is an undocumented 1-row table (id bigint, fetch text) with a
---   wide-open `ALL / public / true` policy. It appears to be an abandoned test
---   table. Confirm it is unused, then drop it — the commented-out line below.
+--   wide-open `ALL / public / true` policy — it looks like an abandoned test
+--   table. Confirm, then drop it.
 -- ----------------------------------------------------------------------------
 revoke all on public.email_sent_log from anon, authenticated;
 revoke all on public."fetch"        from anon, authenticated;
+drop policy if exists "ALL" on public."fetch";
 
 -- drop table if exists public."fetch";   -- uncomment once confirmed unused
 
 
 -- ----------------------------------------------------------------------------
--- Block 5 — Unguessable approve tokens.
+-- Block 7 — Unguessable approve tokens, for FUTURE requests only.
 --
---   Current default is substr(md5(random()::text || clock_timestamp()::text), 1, 12):
---   48 bits from a NON-cryptographic PRNG. pgcrypto is already installed, so
---   use it. Existing unresolved tokens are rotated too.
+--   Current default is substr(md5(random()::text || clock_timestamp()::text), 1, 12)
+--   — 48 bits from a non-cryptographic PRNG. pgcrypto is installed.
+--   16 bytes hex = 32 chars; 'appr|' + 32 = 37 bytes, comfortably under
+--   Telegram's 64-byte callback_data cap (the reason the original was short).
+--
+--   Existing tokens are deliberately NOT rotated: they are embedded in Telegram
+--   messages already sent, and rotating them would break the ✅/❌ buttons on
+--   the 4 currently-unresolved requests (R1-BUG-3). Rotate them only if you
+--   also re-send those alerts.
 -- ----------------------------------------------------------------------------
 alter table public.access_requests
   alter column approve_token set default encode(gen_random_bytes(16), 'hex');
 
-update public.access_requests
-  set approve_token = encode(gen_random_bytes(16), 'hex')
-  where not resolved;
+commit;
 
 
--- ----------------------------------------------------------------------------
--- Block 6 — Verification. All of these should come back clean.
--- ----------------------------------------------------------------------------
---  a) No public function should be anon-executable except the three the
---     /verify/ page genuinely needs pre-login:
---       is_sender_allowlisted, log_access_request, list_all_physicians
---     (list_all_physicians still leaks 250 names — see SECURITY_ANALYSIS.md
---      §2a; it needs an application change, not just a grant change.)
+-- ============================================================================
+-- Block 8 — VERIFICATION. Run after applying. Compare against the expectations.
+-- ============================================================================
+
+-- (a) anon-executable functions. EXPECTED, exactly three:
+--       is_sender_allowlisted, log_access_request, get_line_bind_gate_status
+--     plus list_all_physicians until Appendix B is done.
 select p.proname, pg_get_function_identity_arguments(p.oid) as args
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and has_function_privilege('anon', p.oid, 'EXECUTE')
+where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')
 order by p.proname;
 
---  b) No anon-visible policy anywhere.
+-- (b) anon/public-visible RLS policies. EXPECTED: zero rows.
 select tablename, policyname, roles::text
 from pg_policies
-where schemaname = 'public'
-  and ('anon' = any(roles) or 'public' = any(roles));
+where schemaname = 'public' and ('anon' = any(roles) or 'public' = any(roles));
 
---  c) anon must hold no table privileges at all in public.
+-- (c) TABLE-level grants. EXPECTED: zero rows for anon.
 select grantee, table_name, privilege_type
 from information_schema.role_table_grants
-where table_schema = 'public' and grantee in ('anon', 'authenticated')
-order by table_name, grantee;
+where table_schema = 'public' and grantee = 'anon';
+
+-- (d) COLUMN-level grants — role_table_grants does NOT show these, which is why
+--     (c) alone is not sufficient. EXPECTED: authenticated only, and only
+--     firstname/lastname/department/submitted_at on rosters plus the four
+--     p4p_submissions columns. Zero rows for anon.
+select grantee, table_name, string_agg(column_name, ',' order by column_name) as cols
+from information_schema.column_privileges
+where table_schema = 'public' and grantee in ('anon', 'authenticated') and privilege_type = 'SELECT'
+group by grantee, table_name order by grantee, table_name;
+
+-- (e) Default privileges. EXPECTED: the postgres rows no longer mention
+--     anon/authenticated. The supabase_admin rows WILL still mention them —
+--     that is expected and is what Block 2's event trigger covers.
+select pg_get_userbyid(defaclrole) as grantor, defaclobjtype as objtype,
+       array_to_string(defaclacl::text[], ' | ') as default_acl
+from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace
+where n.nspname = 'public' order by objtype, grantor;
+
+-- (f) Prove Block 2 works end to end. EXPECTED: the select returns false.
+--     (Run outside the transaction above.)
+-- create table public.__grant_canary (id int);
+-- select has_table_privilege('anon', 'public.__grant_canary', 'SELECT')
+--     or has_table_privilege('anon', 'public.__grant_canary', 'TRUNCATE') as anon_has_something;
+-- drop table public.__grant_canary;
+
+
+-- ============================================================================
+-- Appendix A — main.js change required before get_line_bind_gate_status can be
+--              locked down (and a deeper problem with that gate).
+-- ============================================================================
+--  Today main.js:147-158 calls the RPC with the anon key. Change it to use the
+--  user's already-resolved access token (`at`, in scope at main.js:196):
+--
+--      headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + at, ... }
+--
+--  then `revoke execute on function public.get_line_bind_gate_status(text)
+--  from anon;` becomes safe, and the email-enumeration oracle closes.
+--
+--  SEPARATELY, and more important: the gate FAILS OPEN. Any error — network
+--  blip, 403, timeout — makes getLineBindGateStatus return null, and main.js:199
+--  then skips BOTH the bind requirement AND the blocked_emails denylist check.
+--  Failing open on the bind requirement is a defensible UX decision. Failing
+--  open on revocation is not: it means the only mechanism for cutting off a
+--  departed or compromised physician stops working, silently, whenever that RPC
+--  hiccups. Recommend splitting the two: fail open on `is_bound`, fail CLOSED on
+--  `is_blocked` (or cache the denylist in the server process and fall back to
+--  the cache rather than to "allow").
+--
+-- ============================================================================
+-- Appendix B — the largest exposure, which no grant can fix.
+-- ============================================================================
+--  list_all_physicians() returns all 250 physician full names to any caller
+--  holding the publishable key — which is, correctly, published in page source.
+--  verify/app.js:254 calls it pre-login to populate the "select your name"
+--  dropdown, so it cannot simply be revoked; 238 such calls are recorded in
+--  pg_stat_statements. RLS restricts firstname/lastname to allow-listed
+--  authenticated users, and this function hands the same data to anon.
+--
+--  Options, best first:
+--    1. Delete the dropdown. Take the physician's name as free text on the
+--       access-request form (cap length, strip control chars — it is
+--       interpolated into a Telegram message). The admin already sees the name
+--       and email in the approval alert, and the automation already does
+--       Levenshtein matching. Removes the endpoint entirely.
+--    2. Keep a dropdown but never send the roster: have the client POST the
+--       typed name and return only a boolean/close-match count from a
+--       SECURITY DEFINER function, so no list ever crosses the wire.
+--    3. Weakest: keep it, but require the email to have already passed
+--       is_sender_allowlisted. Does not help here — by definition the people
+--       who see this form are NOT allow-listed.
+--
+--  Option 1 is a small change to verify/app.js + verify/index.html and closes
+--  the only confirmed PII-to-internet path in the system.
