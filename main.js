@@ -273,13 +273,29 @@ function servePage(name) {
         clearSessionCookie(res)
         return res.redirect(302, "/verify/?reason=blocked#")
       }
-      if (LINE_BIND_ENFORCE) {
-        // The session itself must have proved its LINE identity. Checking
-        // `is_bound` instead would gate nothing: an attacker holding a stolen
-        // email inherits the victim's own earlier bind and walks straight in,
-        // even though their bind attempt was refused as a mismatch. No
-        // attempts-based fail-open here either — a second factor you can opt
-        // out of by failing three times is not a second factor.
+      // Signed out, or revoked by an admin: Supabase DELETES the auth.sessions
+      // row, so a missing row means this access token outlived its session.
+      // Applies in both modes — it is a correctness fix, not part of the second
+      // factor. /auth/logout only clears our cookie and never calls Supabase
+      // signOut, so before this nothing in the system could really revoke a
+      // session; a lifted cookie stayed good until the cached token expired.
+      if (gate.session_revoked) {
+        clearSessionCookie(res)
+        return res.redirect(302, "/verify/?reason=expired#")
+      }
+      // `enforce_eligible` is true only for emails that have proved their LINE
+      // identity through this flow at least once. Without that condition,
+      // switching enforcement on would bounce every physician at once if the
+      // LIFF app turned out to be missing the `openid` scope — ~200 people
+      // locked out of a hospital tool by one env var. Users who have never
+      // proved keep the old rules until they do, so the factor phases in.
+      if (LINE_BIND_ENFORCE && gate.enforce_eligible) {
+        // The SESSION must have proved it. Checking `is_bound` instead would
+        // gate nothing: an attacker holding a stolen email inherits the
+        // victim's earlier bind and walks straight in, even though their own
+        // bind was refused as a mismatch. No attempts-based fail-open here
+        // either — a second factor you can opt out of by failing three times
+        // is not a second factor.
         if (!gate.session_verified) {
           return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
         }
