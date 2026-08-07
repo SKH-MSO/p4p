@@ -27,13 +27,30 @@ export default [
     },
   },
 
-  // Browser helper served to the LIFF pages.
+  // Browser scripts served to the LIFF pages. `assets/` holds the shared
+  // helpers; the four page directories hold each page's own app.js. These were
+  // previously outside every `files` block, so they fell back to the bare
+  // recommended config with NO globals declared — every use of `fetch`,
+  // `location`, `localStorage`, `console` etc. was reported as no-undef, which
+  // buried any real finding under ~56 false ones.
   {
-    files: ["assets/**/*.js"],
+    files: [
+      "assets/**/*.js",
+      "verify/**/*.js",
+      "status/**/*.js",
+      "list/**/*.js",
+      "ranking/**/*.js",
+    ],
     languageOptions: {
       sourceType: "script",
       ecmaVersion: "latest",
-      globals: { ...globals.browser },
+      globals: {
+        ...globals.browser,
+        // Loaded from CDNs / injected by the page, not bundled.
+        supabase: "readonly",
+        liff: "readonly",
+        P4P: "writable",
+      },
     },
   },
 
