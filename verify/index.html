@@ -268,11 +268,15 @@
             <!-- Step 2b: request access (email not yet registered) -->
             <form id="request-step" class="hidden" novalidate>
                 <label for="reqname">ชื่อ-นามสกุล</label>
-                <select id="reqname" required disabled>
-                    <option value="" disabled selected>-- กำลังโหลดรายชื่อ... --</option>
-                </select>
+                <!-- Free text, NOT a roster dropdown. The previous <select> was
+                     filled from list_all_physicians(), which had to be callable
+                     by `anon` because this step runs before login — so it handed
+                     every physician's name to anyone with the publishable key.
+                     See verify/app.js and SECURITY_ANALYSIS.md §2a. -->
+                <input id="reqname" type="text" autocomplete="name" maxlength="100"
+                    placeholder="ชื่อ-นามสกุลของท่าน" required>
                 <button id="request-submit" type="submit">ส่งคำขอเข้าใช้งาน</button>
-                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณาเลือกชื่อของท่านเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
+                <p class="hint">อีเมล <b id="req-email"></b> ยังไม่ได้ลงทะเบียน กรุณากรอกชื่อ-นามสกุลของท่านเพื่อให้ผู้ดูแลเพิ่มสิทธิ์ให้ท่าน</p>
                 <button id="request-back" type="button" class="link-btn">ใช้อีเมลอื่น</button>
             </form>
 

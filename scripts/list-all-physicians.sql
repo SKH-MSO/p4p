@@ -1,6 +1,32 @@
 -- ============================================================================
---  P4P — Combined physician name list, for the /verify/ request-access dropdown
+--  ⚠️  SUPERSEDED — the dropdown this backs was REMOVED. Do not reintroduce.
 -- ============================================================================
+--  This function is a PII leak and is scheduled for DROP — see the tail of
+--  scripts/security-hardening-2026-08.sql for the exact statement and the
+--  ordering constraint (the app change must be DEPLOYED first).
+--
+--  Why it was removed
+--  ------------------
+--  The reasoning in the original header (kept below) contains one wrong step:
+--  it argues this "keeps the same exposure as the old free-text field, which
+--  also just captured a self-reported name". That compares the wrong things.
+--  The free-text field only ever moved data INTO the system — one name, typed
+--  by the person themselves. This function moves data OUT: it returns all ~250
+--  physician names, and because the request-access step runs BEFORE login, it
+--  has to be executable by `anon`. The publishable key is (correctly) in page
+--  source, so in practice this published the hospital's entire physician roster
+--  to anyone who looked. Confirmed on the live project: 250 names returned,
+--  238 recorded calls.
+--
+--  RLS deliberately restricts firstname/lastname to allow-listed authenticated
+--  users; SECURITY DEFINER here bypassed exactly that control. /verify/ is back
+--  to a length-capped, control-character-stripped free-text field
+--  (verify/index.html + verify/app.js sanitizeName(), with the authoritative
+--  cleaning server-side in log_access_request()). The admin already sees the
+--  name and email in the Telegram approval alert, so the dropdown only ever
+--  saved a typo.
+--
+--  ---------------------------- ORIGINAL HEADER -------------------------------
 --  The "request access" step on /verify/ used to be a free-text name field.
 --  This backs a dropdown instead: every distinct "firstname lastname" that has
 --  ever appeared in ANY monthly roster table (YYYY_MM), so an unregistered

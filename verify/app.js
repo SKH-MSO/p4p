@@ -242,35 +242,37 @@
             emailLoadingDots.classList.add("hidden")
         }, 6000)
 
-        // ── Physician-name dropdown (request-access step) ───────────────────────
-        // Populated from every roster table combined (list_all_physicians RPC —
-        // see scripts/list-all-physicians.sql) instead of free-text, so a new
-        // physician picks their own name rather than typing it. Sorted with
-        // proper Thai dictionary order: a plain byte-order sort gets leading
-        // vowels (เ/แ/โ/ใ/ไ) wrong since they're written before the consonant
-        // they belong to but sort after it in a real Thai dictionary.
-        async function loadPhysicianNames() {
-            try {
-                const { data, error } = await db.rpc("list_all_physicians")
-                if (error) throw error
-                const names = (data || []).map((r) => r.full_name).filter(Boolean)
-                names.sort((a, b) => a.localeCompare(b, "th"))
-                reqName.firstElementChild.textContent = "-- เลือกชื่อของท่าน --"
-                for (const name of names) {
-                    const opt = document.createElement("option")
-                    opt.value = name
-                    opt.textContent = name
-                    reqName.appendChild(opt)
-                }
-                reqName.disabled = false
-            } catch (err) {
-                console.error("loadPhysicianNames failed:", err)
-                // Leave it disabled — the request-step submit handler requires a
-                // real selection, so this fails safe rather than silently letting
-                // the placeholder value through.
-            }
+        // ── Physician name (request-access step) ────────────────────────────────
+        // This used to be a <select> populated from list_all_physicians(), which
+        // unions every YYYY_MM roster and returns all ~250 physician names. That
+        // RPC is callable by `anon` — it has to be, because this step runs before
+        // login — so the dropdown handed the hospital's entire physician roster
+        // to anyone holding the publishable key, which is (correctly) published in
+        // page source. RLS restricts firstname/lastname to allow-listed
+        // authenticated users; that SECURITY DEFINER function bypassed it
+        // entirely. It was the only confirmed PII-to-internet path in the app.
+        //
+        // It is now a plain text field: nothing about the roster crosses the wire.
+        // The admin already gets name + email in the Telegram approval alert, so
+        // the dropdown was only ever saving them from typos — not worth publishing
+        // the roster for. sanitizeName() below mirrors the server-side cleaning in
+        // log_access_request(), which is the check that actually counts (the RPC
+        // is anon-callable directly, so client validation is advisory only).
+
+        // Strip control characters — including newlines, which would otherwise let
+        // a submitted "name" forge extra lines in the admin's Telegram message —
+        // collapse whitespace, and cap the length.
+        const NAME_MAX = 100
+        function sanitizeName(raw) {
+            return (
+                String(raw || "")
+                    // eslint-disable-next-line no-control-regex
+                    .replace(/[\u0000-\u001F\u007F]/g, " ") // C0 controls + DEL
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .slice(0, NAME_MAX)
+            )
         }
-        loadPhysicianNames()
 
         // ── Pending-email persistence ─────────────────────────────────────────
         // To read the OTP the user must leave LINE for their email app and come
@@ -482,9 +484,9 @@
         requestStep.addEventListener("submit", async (e) => {
             e.preventDefault()
             clearMsg()
-            const name = reqName.value.trim()
+            const name = sanitizeName(reqName.value)
             if (name.length < 2) {
-                showError("กรุณาเลือกชื่อของท่านจากรายการ")
+                showError("กรุณากรอกชื่อ-นามสกุลของท่าน")
                 return
             }
             busy(requestSubmit, true, "กำลังส่ง...")

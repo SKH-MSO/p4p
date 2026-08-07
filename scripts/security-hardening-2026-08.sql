@@ -544,3 +544,34 @@ where n.nspname = 'public' order by objtype, grantor;
 --
 --  Option 1 is a small change to verify/app.js + verify/index.html and closes
 --  the only confirmed PII-to-internet path in the system.
+--
+--  ---------------------------------------------------------------------------
+--  STATUS: option 1 is IMPLEMENTED in the app (verify/index.html now has a
+--  length-capped text input; verify/app.js no longer calls the RPC), and
+--  log_access_request() was hardened server-side on 2026-08-07 to strip control
+--  characters and cap the name at 100 chars — verified against the live DB:
+--    newline-injection attempt -> collapsed to one line
+--    500-char name             -> truncated to 100
+--    tabs/CRLF                 -> stripped, whitespace collapsed
+--    malformed email           -> row not created at all
+--    blank name                -> does not wipe a previously recorded name
+--
+--  ⚠️  THE FUNCTION IS STILL PRESENT AND STILL ANON-CALLABLE, ON PURPOSE.
+--  Production serves `main`, and the currently deployed /verify/ still calls
+--  list_all_physicians() to fill its dropdown. Dropping it now would leave new
+--  physicians unable to submit an access request at all (the dropdown would
+--  never populate and the submit handler requires a selection).
+--
+--  RUN THIS ONLY AFTER the app change is merged to main and deployed, and
+--  after loading /verify/ once to confirm the text field renders:
+--
+--      revoke all on function public.list_all_physicians() from public, anon, authenticated;
+--      drop function if exists public.list_all_physicians();
+--
+--  Verify afterwards — expect exactly THREE anon-executable functions
+--  (is_sender_allowlisted, log_access_request, get_line_bind_gate_status):
+--
+--      select p.proname
+--      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--      where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')
+--      order by p.proname;

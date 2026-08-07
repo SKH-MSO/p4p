@@ -358,10 +358,22 @@ intentional pre-login surface — anon/public RLS policies went 3 → 0, and a l
 canary confirmed new tables/functions/roster tables come out with zero anon
 access while still getting the 4 `authenticated` column grants.
 
+**Item 2 is half-done and the leak is still open.** The app side is fixed —
+`/verify/` no longer calls `list_all_physicians()`; the roster dropdown is now a
+length-capped free-text field, and `log_access_request()` was hardened
+server-side (control characters stripped, name capped at 100, malformed emails
+rejected — all verified against the live DB). But **the function still exists
+and is still `anon`-callable, deliberately**: production serves `main`, and the
+deployed `/verify/` still depends on it. Dropping it before this branch is
+merged and deployed would leave new physicians unable to request access at all.
+The `drop` statement and its verification query are at the end of
+`scripts/security-hardening-2026-08.sql`. Until that runs, all 250 names remain
+reachable with the publishable key.
+
 | # | Action | Area | Effort | Impact |
 |---|---|---|---|---|
 | ~~1~~ | ~~Event trigger stripping anon grants on new objects **+** re-revoke the existing functions~~ **DONE** | Rate limit | S | **Critical** |
-| 2 | Stop `list_all_physicians()` returning 250 names to `anon` | Rate limit | M | **High** |
+| 2 | Stop `list_all_physicians()` returning 250 names to `anon` — **app change done, DB drop pending deploy** (see below) | Rate limit | M | **High** |
 | ~~3~~ | ~~Drop the two stale `p4p_submissions` anon policies~~ **DONE** (the `fetch` table itself still exists; its wide-open policy is gone) | Rate limit | XS | **High** |
 | 4 | Enforce LINE `userId` **match** as a second factor | MFA | M | **High** |
 | 5 | `auth_events` audit table | Anomaly | M | **High** |
