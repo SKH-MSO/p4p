@@ -14,6 +14,29 @@ const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const TELEGRAM_WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
+// The LINE **Login** channel that owns the /verify/ LIFF app — NOT the
+// Messaging API channel that LINE_CHANNEL_SECRET/LINE_ACCESS_TOKEN belong to.
+// Used as `client_id` when asking LINE to verify a LIFF ID token; it is the
+// `aud` LINE checks the token against, so a token minted for someone else's
+// channel is rejected. Without this, ID-token verification cannot run at all.
+const LINE_LOGIN_CHANNEL_ID = process.env.LINE_LOGIN_CHANNEL_ID
+
+// Staged rollout switch for the LINE second factor (scripts/line-bind-verified.sql).
+//
+//   unset/false — DETECT ONLY. Binding is still verified against LINE and a
+//                 mismatch is refused and alerted, but page access keeps the
+//                 existing rules, including the "3 failures then let them
+//                 through" fail-open. Zero lockout risk.
+//   "true"      — ENFORCE. A gated page requires that THIS SESSION proved its
+//                 LINE identity, and the fail-opens are switched off (both the
+//                 attempts limit and the "gate RPC unreachable" path).
+//
+// Do NOT enable until /verify/ has been observed completing real binds in
+// production, because it depends on the LIFF app having the `openid` scope —
+// liff.getIDToken() returns null without it and every bind fails. Check with:
+//   select count(*) from public.line_verified_sessions where verified_at > now() - interval '1 day';
+const LINE_BIND_ENFORCE = process.env.LINE_BIND_ENFORCE === "true"
+
 const headers = {
   "Content-Type": "application/json",
   "Authorization": "Bearer " + LINE_ACCESS_TOKEN
@@ -105,7 +128,6 @@ function jwtPayload(token) {
   } catch (e) { return {} }
 }
 function jwtExp(token) { return typeof jwtPayload(token).exp === "number" ? jwtPayload(token).exp : 0 }
-function jwtEmail(token) { return jwtPayload(token).email || null }
 
 // Resolve a usable access token from the session cookie: reuse the cached one
 // while it's fresh, otherwise refresh once (rotating the cookie). Returns
@@ -136,23 +158,66 @@ async function resolveAccessToken(req, res) {
   return { at, reason: null }
 }
 
-// Single-round-trip check against scripts/line-bind-gate.sql's
-// get_line_bind_gate_status RPC: is this email denylisted, does it already
-// have a LINE userId bound, and how many failed bind attempts so far. Uses
-// the anon key (same posture as is_sender_allowlisted — a yes/no/count
-// oracle callable pre-login, never exposes the underlying rows). Fails OPEN
-// (returns null) on any error — a transient Supabase hiccup must not lock
-// everyone out of pages they already have a valid session for; the
-// underlying data queries are still protected by RLS regardless.
-async function getLineBindGateStatus(email) {
+// Single-round-trip gate check: is this email denylisted, does it have a LINE
+// userId bound, how many failed bind attempts, and did THIS SESSION prove its
+// LINE identity (scripts/line-bind-verified.sql).
+//
+// Called with the USER'S access token, not the anon key. The previous version
+// used the anon key and passed the email as a parameter, which made the RPC an
+// unauthenticated "is this address a registered physician?" oracle — and meant
+// it could not be locked down, because revoking anon would 403, get swallowed
+// by the catch below, and silently disable the whole gate including the
+// denylist. get_line_bind_gate_status_self() takes no argument and reads the
+// email from the caller's own JWT, so there is nothing left to enumerate.
+// (apikey must still be the publishable key — Supabase requires that header —
+// but Authorization is what selects the `authenticated` role.)
+//
+// Returns null on any error. What that MEANS depends on LINE_BIND_ENFORCE:
+// in detect-only mode the caller proceeds (the long-standing fail-open, kept
+// so a transient Supabase hiccup can't lock out a whole hospital); with
+// enforcement on, the caller refuses to serve the page instead.
+async function getLineBindGateStatus(accessToken) {
   try {
     const r = await axios.post(
-      SUPABASE_URL + "/rest/v1/rpc/get_line_bind_gate_status",
-      { p_email: email },
-      { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + SUPABASE_ANON, "Content-Type": "application/json" }, timeout: 8000 }
+      SUPABASE_URL + "/rest/v1/rpc/get_line_bind_gate_status_self",
+      {},
+      { headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + accessToken, "Content-Type": "application/json" }, timeout: 8000 }
     )
     return (r.data && r.data[0]) || null
   } catch (e) {
+    console.error("[gate] get_line_bind_gate_status_self failed:",
+      e.response ? e.response.status + " " + JSON.stringify(e.response.data) : e.message)
+    return null
+  }
+}
+
+// Ask LINE whether a LIFF ID token is genuine. LINE checks the signature,
+// expiry and audience for us and returns the claims; `sub` is the
+// authoritative LINE userId.
+//
+// This is the whole point of the second factor. liff.getProfile().userId is
+// just a string the browser chooses to send — the old bind RPC took it as a
+// parameter and believed it. An ID token cannot be forged by the page.
+async function verifyLineIdToken(idToken) {
+  if (!LINE_LOGIN_CHANNEL_ID) {
+    console.error("[line-bind] LINE_LOGIN_CHANNEL_ID is not set — cannot verify ID tokens")
+    return null
+  }
+  try {
+    const r = await axios.post(
+      "https://api.line.me/oauth2/v2.1/verify",
+      new URLSearchParams({ id_token: idToken, client_id: LINE_LOGIN_CHANNEL_ID }).toString(),
+      { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 8000 }
+    )
+    const sub = r.data && r.data.sub
+    if (!sub) {
+      console.error("[line-bind] LINE verify returned no sub claim")
+      return null
+    }
+    return { sub: sub, name: (r.data && r.data.name) || null }
+  } catch (e) {
+    console.error("[line-bind] LINE rejected the id_token:",
+      e.response ? JSON.stringify(e.response.data) : e.message)
     return null
   }
 }
@@ -193,17 +258,33 @@ function servePage(name) {
     const { at, reason } = await resolveAccessToken(req, res)
     if (!at) return res.redirect(302, "/verify/?return=" + ret + "&reason=" + reason + "#")
 
-    const email = jwtEmail(at)
-    if (email) {
-      const gate = await getLineBindGateStatus(email)
-      if (gate) {
-        if (gate.is_blocked) {
-          clearSessionCookie(res)
-          return res.redirect(302, "/verify/?reason=blocked#")
-        }
-        if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
+    const gate = await getLineBindGateStatus(at)
+
+    if (!gate) {
+      // Could not confirm the denylist OR the session's LINE proof.
+      if (LINE_BIND_ENFORCE) {
+        return res.redirect(302, "/verify/?return=" + ret + "&reason=gate_unavailable#")
+      }
+      // Detect-only mode keeps the historical fail-open. Noted here because it
+      // is a real gap while it lasts: a broken gate RPC silently stops
+      // blocked_emails from being enforced at all.
+    } else {
+      if (gate.is_blocked) {
+        clearSessionCookie(res)
+        return res.redirect(302, "/verify/?reason=blocked#")
+      }
+      if (LINE_BIND_ENFORCE) {
+        // The session itself must have proved its LINE identity. Checking
+        // `is_bound` instead would gate nothing: an attacker holding a stolen
+        // email inherits the victim's own earlier bind and walks straight in,
+        // even though their bind attempt was refused as a mismatch. No
+        // attempts-based fail-open here either — a second factor you can opt
+        // out of by failing three times is not a second factor.
+        if (!gate.session_verified) {
           return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
         }
+      } else if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
+        return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
       }
     }
 
@@ -256,6 +337,85 @@ app.post("/auth/session", express.json({ limit: "8kb" }), async (req, res) => {
   res.json({ ok: true })
 })
 app.post("/auth/logout", (req, res) => { clearSessionCookie(res); res.json({ ok: true }) })
+
+// Bind (or re-prove) the caller's LINE identity — the second factor.
+//
+// Both identities are established SERVER-SIDE here, and neither is taken on
+// trust from the request body:
+//   who they are in P4P   -> Supabase validates the access token
+//   who they are on LINE  -> LINE validates the ID token, and its `sub` claim
+//                            is the userId we store/compare
+// The DB function is service_role-only, so a browser cannot reach it directly
+// and cannot assert a LINE userId of its own choosing the way the old
+// bind_line_user_id(p_line_user_id) allowed.
+app.post("/line/bind", express.json({ limit: "8kb" }), async (req, res) => {
+  const authHeader = req.headers.authorization || ""
+  const at = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : ""
+  const idToken = (req.body && req.body.id_token) || ""
+  if (!at || !idToken) return res.status(400).json({ error: "missing token" })
+
+  // 1. Validate the session against Supabase rather than reading the JWT body —
+  //    this endpoint decides who a LINE account gets attached to, so the email
+  //    must come from an authority, not from an unverified claim.
+  let email = null
+  try {
+    const u = await axios.get(SUPABASE_URL + "/auth/v1/user", {
+      headers: { apikey: SUPABASE_ANON, Authorization: "Bearer " + at }, timeout: 8000,
+    })
+    email = u.data && u.data.email
+  } catch (e) {
+    return res.status(401).json({ error: "invalid session" })
+  }
+  if (!email) return res.status(401).json({ error: "no email on session" })
+
+  // 2. Validate the LINE ID token with LINE.
+  const line = await verifyLineIdToken(idToken)
+  if (!line) return res.status(401).json({ error: "line verification failed" })
+
+  // Without a session_id there is nothing to attach the proof to, so
+  // get_line_bind_gate_status_self would keep reporting session_verified=false
+  // and — with enforcement on — bounce the user straight back here forever.
+  // Fail loudly instead: an infinite redirect inside LINE's webview is close to
+  // undebuggable from the physician's side. session_id is a required claim on
+  // every Supabase access token, so this should be unreachable.
+  const sessionId = jwtPayload(at).session_id || null
+  if (!sessionId) {
+    console.error("[line-bind] access token has no session_id claim — cannot record proof")
+    return res.status(500).json({ error: "no session_id on token" })
+  }
+
+  // 3. Record it. session_id ties the proof to THIS session; it is a required
+  //    claim on every Supabase access token and is stable across refreshes, so
+  //    a physician proves once per session rather than once per page load.
+  try {
+    const r = await axios.post(
+      SUPABASE_URL + "/rest/v1/rpc/bind_line_user_id_verified",
+      {
+        p_email: email,
+        p_line_user_id: line.sub,
+        p_line_display_name: line.name,
+        p_session_id: sessionId,
+      },
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+          "Content-Type": "application/json",
+        },
+        timeout: 8000,
+      }
+    )
+    const status = (r.data && r.data.status) || "error"
+    console.log("[line-bind] " + email + " -> " + status)
+    if (status === "mismatch") return res.status(403).json({ status: status })
+    if (status === "bound" || status === "match") return res.json({ status: status })
+    return res.status(500).json({ status: status })
+  } catch (e) {
+    console.error("[line-bind] bind RPC failed:",
+      e.response ? e.response.status + " " + JSON.stringify(e.response.data) : e.message)
+    return res.status(500).json({ error: "bind failed" })
+  }
+})
 
 // Receives Telegram's "callback_query" webhook when an admin taps ✅/❌ on the
 // access-request alert (buttons added by scripts/telegram-approve-buttons.sql).

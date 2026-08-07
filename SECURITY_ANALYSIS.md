@@ -122,13 +122,41 @@ it has never been exercised in production.
 
 ### Recommendations
 
-- **P1 — Enforce the LINE binding as a real second factor.** Add
-  `verify_line_binding(p_line_user_id)` comparing the live
-  `liff.getProfile().userId` to the stored one; deny + alert on mismatch. Keep
-  an admin-clearable reset flag for genuine phone changes. `shared_line_ids = 0`
-  means this can ship without breaking anyone.
+- **P1 — Enforce the LINE binding as a real second factor.** **Implemented**
+  (`scripts/line-bind-verified.sql`, `main.js` `POST /line/bind`), but note the
+  correction below — the first version of this recommendation was wrong.
+
+  > **Correction.** This originally said to add
+  > `verify_line_binding(p_line_user_id)` comparing the live
+  > `liff.getProfile().userId` to the stored one. That would not have been a
+  > second factor. `bind_line_user_id` takes the userId as a **parameter**, and
+  > `liff.getProfile()` runs in the browser — its output is just a string the
+  > page chooses to send. The client would have been supplying the value being
+  > compared: it sets it on first bind, and afterwards anyone who learns the
+  > opaque `U…` string can replay it.
+  >
+  > What actually works is `liff.getIDToken()` — an OIDC JWT signed by LINE —
+  > verified server-side via `POST https://api.line.me/oauth2/v2.1/verify`. The
+  > `sub` claim is then an authenticated LINE userId the client cannot forge.
+  > `bind_line_user_id_verified()` is `service_role`-only, so the browser cannot
+  > reach it at all; only `main.js` can, and only after LINE has vouched.
+  >
+  > A second correction follows from the first: a mismatch check gates nothing
+  > on its own. An attacker holding a stolen email inherits the victim's
+  > earlier bind, so `is_bound` is true and they walk into `/status/` even
+  > though their own bind was refused. Proof has to be **per session** —
+  > `line_verified_sessions`, keyed on the access token's `session_id` claim
+  > (a required claim, stable across refreshes).
+
+  Rolled out in two stages via `LINE_BIND_ENFORCE`: detect-only first (verify +
+  refuse + alert on mismatch, existing access rules untouched), then enforcing.
+  The gate is the reason for the staging — it depends on the LIFF app having the
+  `openid` scope, which `getProfile()` never needed.
 - **P2 — Bound the fail-open** to the current session and re-alert each time,
-  instead of one latch per email forever.
+  instead of one latch per email forever. **Partly done**: with
+  `LINE_BIND_ENFORCE=true` both fail-opens are off (the attempts limit and the
+  "gate RPC unreachable" path). The one-shot `admin_notified` latch in
+  `record_bind_failure()` is unchanged.
 - **P3 — Expire sessions.** Set a Supabase session timeout (e.g. 30 days
   rolling / 90 absolute) and cut the cookie `Max-Age` to match. 400 days on a
   monthly-use tool is pure downside.
@@ -375,7 +403,7 @@ reachable with the publishable key.
 | ~~1~~ | ~~Event trigger stripping anon grants on new objects **+** re-revoke the existing functions~~ **DONE** | Rate limit | S | **Critical** |
 | 2 | Stop `list_all_physicians()` returning 250 names to `anon` — **app change done, DB drop pending deploy** (see below) | Rate limit | M | **High** |
 | ~~3~~ | ~~Drop the two stale `p4p_submissions` anon policies~~ **DONE** (the `fetch` table itself still exists; its wide-open policy is gone) | Rate limit | XS | **High** |
-| 4 | Enforce LINE `userId` **match** as a second factor | MFA | M | **High** |
+| ~~4~~ | ~~Enforce LINE `userId` match as a second factor~~ **CODE DONE, awaiting deploy + `openid` scope** — server-verified ID tokens, not a client-supplied userId (see §1 P1) | MFA | M | **High** |
 | 5 | `auth_events` audit table | Anomaly | M | **High** |
 | 6 | Expire sessions (Supabase timeout + cookie `Max-Age`) | MFA | S | High |
 | 7 | Create + enable the signup allow-list hook | Rate limit | S | High |

@@ -154,18 +154,47 @@
             }
             if (!liff.isLoggedIn()) throw new Error("liff.isLoggedIn() returned false")
 
-            let profile
-            try {
-                profile = await liff.getProfile()
-            } catch (err) {
-                throw new Error("liff.getProfile failed: " + describeError(err))
+            // An ID TOKEN, not getProfile(). getProfile() returns plain JSON
+            // that this page could put any value into — the old flow passed
+            // its userId straight to bind_line_user_id(), so the browser was
+            // asserting its own LINE identity and the "binding" proved nothing.
+            // An ID token is signed by LINE and verified server-side in
+            // main.js (POST /line/bind), so the userId that gets stored is one
+            // LINE vouched for. See scripts/line-bind-verified.sql.
+            const idToken = liff.getIDToken()
+            if (!idToken) {
+                throw new Error(
+                    "liff.getIDToken() returned null — the LIFF app is almost certainly " +
+                    "missing the `openid` scope (getProfile only needs `profile`). " +
+                    "Enable it for LIFF id " + LIFF_ID + " in the LINE Developers console."
+                )
             }
 
-            const { error } = await buildAuthedClient(accessToken).rpc("bind_line_user_id", {
-                p_line_user_id: profile.userId,
-                p_line_display_name: profile.displayName || null,
+            const resp = await fetch("/line/bind", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: "Bearer " + accessToken,
+                },
+                body: JSON.stringify({ id_token: idToken }),
             })
-            if (error) throw new Error("bind_line_user_id RPC failed: " + describeError(error))
+            const body = await resp.json().catch(() => ({}))
+
+            // A mismatch is NOT a retryable failure — it means a different,
+            // LINE-verified account is presenting itself for this email. The
+            // server has already refused it and alerted the admin. Flagged so
+            // runLineBindFlow can avoid burning a bind attempt on it: those
+            // attempts exist for device/permission problems, and letting a
+            // mismatch count down to the fail-open limit would hand an
+            // attacker exactly the bypass this whole change removes.
+            if (resp.status === 403 && body.status === "mismatch") {
+                const mismatchErr = new Error("LINE account does not match the one bound to this email")
+                mismatchErr.mismatch = true
+                throw mismatchErr
+            }
+            if (!resp.ok) {
+                throw new Error("/line/bind failed: " + resp.status + " " + JSON.stringify(body))
+            }
         }
 
         // Records one failed attempt server-side and returns the running count.
@@ -207,6 +236,18 @@
                 const ts = new Date().toISOString().slice(11, 19)
                 bindDebugLog.textContent += `[${ts}] ${describeError(err)}\n`
                 bindDebugLog.classList.remove("hidden")
+
+                // Verified-but-different LINE account: stop here. No retry, no
+                // attempt recorded, no redirect — the admin has been alerted
+                // and only they can clear the binding (see the runbook at the
+                // end of scripts/line-bind-verified.sql).
+                if (err && err.mismatch) {
+                    showError("บัญชี LINE ของท่านไม่ตรงกับที่ลงทะเบียนไว้")
+                    bindStatusText.textContent =
+                        "ระบบตรวจพบว่าท่านเข้าใช้งานจากบัญชี LINE อื่น กรุณาติดต่อผู้ดูแลระบบ"
+                    bindRetryBtn.classList.add("hidden")
+                    return
+                }
 
                 const attempts = await recordBindFailure(accessToken)
                 if (attempts >= BIND_ATTEMPT_LIMIT) {
