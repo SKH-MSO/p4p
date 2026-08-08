@@ -274,9 +274,41 @@
             return
         }
 
+        // ── Email input draft persistence ────────────────────────────────────
+        // The loading-dots delay below can overlap with LINE's own cross-LIFF-app
+        // reload (see the /verify double-load investigation): if the box unlocks
+        // before that reload fires, a fast typist's input is wiped when the whole
+        // page reloads out from under them, before they ever get to submit it.
+        // Save the value on every keystroke and restore it once on load, so a
+        // reload never costs them what they'd already typed. Cleared once they
+        // actually submit (savePending takes over from there) or once stale — a
+        // draft from an abandoned visit hours ago should not silently reappear.
+        const DRAFT_KEY = "p4p_verify_email_draft"
+        const DRAFT_TTL = 5 * 60 * 1000 // 5 min — comfortably outlasts any reload
+        const saveDraft = (value) => {
+            try {
+                if (value) localStorage.setItem(DRAFT_KEY, JSON.stringify({ value, ts: Date.now() }))
+                else localStorage.removeItem(DRAFT_KEY)
+            } catch (e) { /* storage blocked */ }
+        }
+        const clearDraft = () => {
+            try { localStorage.removeItem(DRAFT_KEY) } catch (e) { /* storage blocked */ }
+        }
+        const readDraft = () => {
+            try {
+                const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null")
+                if (d && d.value && Date.now() - d.ts < DRAFT_TTL) return d.value
+            } catch (e) { /* ignore */ }
+            clearDraft()
+            return null
+        }
+
         // ── Email input intro loading state ──────────────────────────────────
         // Briefly show loading dots over the email input (disabled underneath)
         // when the page first lands on step 1, then hand control to the user.
+        const draftEmail = readDraft()
+        if (draftEmail) emailInput.value = draftEmail
+        emailInput.addEventListener("input", () => saveDraft(emailInput.value.trim()))
         emailInput.disabled = true
         setTimeout(() => {
             emailInput.disabled = false
@@ -456,6 +488,7 @@
                 if (error) throw error
 
                 savePending(email)      // survive an in-app-browser reload
+                clearDraft()             // job done — savePending covers the next step now
                 goToCodeStep(email)
                 busy(emailSubmit, false, "ส่งรหัสยืนยัน")
                 showOk("ส่งรหัสยืนยันแล้ว กรุณาตรวจสอบอีเมลของท่าน")
