@@ -605,10 +605,37 @@ app.get(["/verify", "/verify/"], async (req, res) => {
   // are deliberately untouched: those clear a genuinely stale fragment left by
   // a DIFFERENT LIFF app, which is a real problem and a different one.
   res.setHeader("Content-Type", "text/html; charset=utf-8")
-  if (req.query.reason !== "bind_required") {
-    return res.send(verifyTemplate)
-  }
+
+  // Inject the access token whenever a VALID SESSION EXISTS — not only when
+  // the URL still carries ?reason=bind_required.
+  //
+  // Incident (2026-08): an unbound physician reported the "ยืนยันอีเมล" email
+  // form reloading 2-3 times instead of binding silently. That page is the
+  // email/OTP step, which verify/app.js only shows when NO token was injected
+  // — the tell that finally explained why no POST /line/bind, no
+  // line_bind_attempts row and no line_verified_sessions row ever appeared:
+  // runLineBindFlow was never reached at all.
+  //
+  // Cause: servePage bounces them here as
+  // /verify/?return=…&reason=bind_required with the token injected, and
+  // verify/app.js starts the silent bind. liff.init() then performs a LINE
+  // login round-trip which navigates to the LIFF app's REGISTERED endpoint
+  // URL — our query string does not survive that. Coming back, reason was no
+  // longer "bind_required", so no token was injected, and the physician got
+  // dropped onto the email form for an account they were already signed in to.
+  //
+  // Keying off the session removes the dependency on a query parameter
+  // surviving a third party's redirect. Note this also means a signed-in
+  // visitor to /verify/ is taken straight through the bind rather than being
+  // offered the email form; switching accounts requires POST /auth/logout
+  // first. That is the right trade — being unable to log in at all is far
+  // worse than an awkward account switch.
   const { at } = await resolveAccessToken(req, res)
+  console.log(
+    "[verify] reason=" + (req.query.reason || "-") +
+    " session=" + (at ? "yes" : "no") +
+    " token_injected=" + (at ? "yes" : "no")
+  )
   res.send(at ? verifyTemplate.replace(PAGE_TOKEN_PLACEHOLDER, at) : verifyTemplate)
 })
 
