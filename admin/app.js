@@ -128,15 +128,17 @@
     // ── Table select ─────────────────────────────────────────────────────
     async function loadTables() {
         const { tables } = await api("/admin/api/tables")
+        // API returns ascending (YYYY_MM order); show newest month first.
+        const sorted = [...tables].sort().reverse()
         tableSelect.innerHTML = ""
-        for (const t of tables) {
+        for (const t of sorted) {
             const opt = document.createElement("option")
             opt.value = t
             opt.textContent = t
             tableSelect.appendChild(opt)
         }
         const preferred = currentRosterTableName()
-        tableSelect.value = tables.includes(preferred) ? preferred : (tables[tables.length - 1] || "")
+        tableSelect.value = sorted.includes(preferred) ? preferred : (sorted[0] || "")
         return tableSelect.value
     }
 
