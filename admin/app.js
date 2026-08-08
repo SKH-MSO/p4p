@@ -379,10 +379,15 @@
 
     // ── Boot ─────────────────────────────────────────────────────────────
     ;(async function main() {
+        // Show the app shell (header/filter-bar/content) up front so the
+        // loading spinner — now inside #content, not floating above
+        // everything — has somewhere to render while the auth check is in
+        // flight. If it turns out we're not authenticated, api()'s 401
+        // handler hides #app and shows #unauthorized instead.
+        appEl.classList.remove("hidden")
         load.style.display = "block"
         try {
             currentTable = await loadTables()
-            appEl.classList.remove("hidden")
             unauthorized.classList.add("hidden")
             if (currentTable) await loadRowsAndColumns(currentTable)
         } catch (e) {
