@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert   from "node:assert/strict";
-import { resolvePhysicianName, resolvePhysicianNameFromSheet } from "../claude-analyst.js";
+import {
+  resolvePhysicianName,
+  resolvePhysicianNameCandidates,
+  resolvePhysicianNameFromSheet,
+} from "../claude-analyst.js";
 
 // ── Compound เดือน<month> should not be treated as a lastname ────────────────
 
@@ -69,6 +73,84 @@ test("department word after firstname returns firstname only", () => {
     resolvePhysicianName("P4P วราวุธ อายุรกรรม เม.ย. 69.xlsx", "", ""),
     "วราวุธ"
   );
+});
+
+// ── Title prefixes typed with a comma instead of a dot ───────────────────────
+// Real case (run #389): the attachment was named "พ,แพร จันทรรังสรรค์ กค.69.xlsx"
+// and the subject read "พ.แพร จันทรรังสรรค์ p4p กค. 69".  "," and "." are
+// adjacent keys, so this slip is common.
+
+test("one-letter prefix with a comma is stripped from the filename", () => {
+  assert.equal(
+    resolvePhysicianName("พ,แพร จันทรรังสรรค์ กค.69.xlsx", "", ""),
+    "แพร จันทรรังสรรค์"
+  );
+});
+
+test("one-letter prefix with a dot is not welded onto the firstname", () => {
+  // Regression: the Pattern-2 dot-collapse used to turn "พ.แพร" into "พแพร",
+  // which matched no physician in the database.
+  assert.equal(
+    resolvePhysicianName("", "พ.แพร จันทรรังสรรค์ p4p กค. 69", ""),
+    "แพร จันทรรังสรรค์"
+  );
+});
+
+test("multi-char title with a comma still resolves", () => {
+  assert.equal(
+    resolvePhysicianName("P4P นพ,สมชาย ใจดี มกราคม 2569.xlsx", "", ""),
+    "สมชาย ใจดี"
+  );
+});
+
+test("comma between firstname and lastname is a separator", () => {
+  assert.equal(
+    resolvePhysicianName("P4P แพร,จันทรรังสรรค์ กค.69.xlsx", "", ""),
+    "แพร จันทรรังสรรค์"
+  );
+});
+
+test("พ.ค. month abbreviation is not mistaken for a one-letter prefix", () => {
+  assert.equal(
+    resolvePhysicianName("P4P สมชาย ใจดี พ.ค. 69.xlsx", "", ""),
+    "สมชาย ใจดี"
+  );
+});
+
+// ── Multi-source candidates ──────────────────────────────────────────────────
+
+test("subject name is kept as a candidate when the filename differs", () => {
+  // The filename yields only a firstname (department where the surname belongs);
+  // the subject spells the full name out.  Both must survive so the caller can
+  // retry the second one when the first misses in the database.
+  const got = resolvePhysicianNameCandidates(
+    "P4P วราวุธ อายุรกรรม เม.ย. 69.xlsx",
+    "P4P นพ.วราวุธ เมธีศิริวัฒน์ เมษายน 2569",
+    ""
+  );
+  assert.deepEqual(got, ["วราวุธ", "วราวุธ เมธีศิริวัฒน์"]);
+});
+
+test("candidates are de-duplicated and filename stays first", () => {
+  const got = resolvePhysicianNameCandidates(
+    "P4P สมชาย ใจดี 2569.xlsx",
+    "P4P สมชาย ใจดี มกราคม 2569",
+    ""
+  );
+  assert.deepEqual(got, ["สมชาย ใจดี"]);
+});
+
+test("resolvePhysicianName returns the first candidate", () => {
+  const filename = "P4P วราวุธ อายุรกรรม เม.ย. 69.xlsx";
+  const subject  = "P4P นพ.วราวุธ เมธีศิริวัฒน์ เมษายน 2569";
+  assert.equal(
+    resolvePhysicianName(filename, subject, ""),
+    resolvePhysicianNameCandidates(filename, subject, "")[0]
+  );
+});
+
+test("no name anywhere yields an empty candidate list", () => {
+  assert.deepEqual(resolvePhysicianNameCandidates("report.xlsx", "", ""), []);
 });
 
 // ── Sheet-based fallback resolver ────────────────────────────────────────────

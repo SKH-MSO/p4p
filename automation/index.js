@@ -11,7 +11,7 @@
 
 import { createGmailClient }             from "./gmail-client.js";
 import { createDriveClient }             from "./drive-client.js";
-import { analyseJson, resolveBeMonth, resolvePhysicianNameFromSheet } from "./claude-analyst.js";
+import { analyseJson, resolveBeMonth, resolvePhysicianNameCandidates, resolvePhysicianNameFromSheet } from "./claude-analyst.js";
 import { matchName, saveScore, logSubmission, bumpSenderMatch } from "./supabase-client.js";
 import { sendTelegram, formatResultMessage, formatErrorMessage } from "./telegram.js";
 import { buildHtmlReply }               from "./templates/reply.js";
@@ -571,14 +571,19 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
     return "replied";
   }
 
-  // ── Fallback: filename name missed — try names from inside the workbook ──
-  // The filename/subject/body pre-scan can yield a wrong name when the sender
-  // mis-names the file (department word or month abbrev instead of surname).
-  // The correct name is usually still written inside the sheet (a ชื่อแพทย์
-  // header cell) or in the sheet tab — retry the match against those before
-  // declaring a mismatch.
+  // ── Fallback: the winning name missed — try every other source ───────────
+  // The pre-scan returns the filename's name whenever it finds one, but the
+  // filename is the source senders most often get wrong (a comma for the
+  // title's dot, a department word or month abbrev where the surname belongs).
+  // Before declaring a mismatch, retry against the names the losing sources
+  // produced — the subject and body first (the sender spelled those out
+  // deliberately), then the workbook itself (a ชื่อแพทย์ header cell or the
+  // sheet tab, which usually carry the correct name even when the file does not).
   if (!match) {
-    const fallbackNames = resolvePhysicianNameFromSheet(rows, chosenSheet);
+    const fallbackNames = [...new Set([
+      ...resolvePhysicianNameCandidates(filename ?? "", subject, body),
+      ...resolvePhysicianNameFromSheet(rows, chosenSheet),
+    ])];
     for (const candidate of fallbackNames) {
       if (candidate === analysis.name) continue;
       let alt;
@@ -586,7 +591,7 @@ async function processBuffer(buffer, { subject = "", body = "", filename, replyT
         alt = await matchName(candidate, analysis.date);
       } catch { continue; } // table/DB errors already surfaced by the primary match
       if (alt) {
-        console.log(`│        🔁  Filename name "${analysis.name}" missed — recovered "${candidate}" from sheet → matched "${alt.matchedName}" (${(alt.similarity * 100).toFixed(0)}%)`);
+        console.log(`│        🔁  Name "${analysis.name}" missed — recovered "${candidate}" → matched "${alt.matchedName}" (${(alt.similarity * 100).toFixed(0)}%)`);
         analysis.name = candidate;
         match = alt;
         break;
