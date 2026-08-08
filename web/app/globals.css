@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+/**
+ * Design tokens — the single definition for the whole app.
+ *
+ * Values come from ../../design.md. Today the same palette is copy-pasted into
+ * four :root blocks across verify/, status/, list/ and ranking/index.html, and
+ * they have already drifted in small ways. This is the replacement.
+ *
+ * Names are deliberately NOT one-to-one with the old CSS variables: --text and
+ * --border were too generic to grep for, so they are --color-ink and
+ * --color-line here. The hex values are unchanged.
+ */
+@theme {
+  /* Brand (design.md § Color Palette) */
+  --color-primary: #a68966; /* warm tan */
+  --color-secondary: #4b3d33; /* deep brown */
+  --color-tertiary: #f5f5f0; /* creamy off-white */
+  --color-neutral: #faf9f6; /* page background */
+
+  /* Text and edges */
+  --color-ink: #2d2d2d;
+  --color-ink-muted: #6b6b6b;
+  --color-muted: #9a8a7a;
+  --color-line: #d9d2c8;
+  --color-faint: #c9beaf; /* em-dash placeholders in tables */
+
+  /* Status */
+  --color-danger: #c0392b;
+  --color-success: #2f7d32;
+
+  /* Typography (design.md § Typography) */
+  --font-display: "Manrope", "Noto Sans Thai Looped", sans-serif;
+  --font-body: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+
+  /* Shape (design.md § Shape & Form — roundedness 1, "subtle") */
+  --radius-card: 4px;
+
+  /*
+   * Month accents, 1-based to match month numbers. Kept here so the palette is
+   * visible in one place, but months are chosen at runtime by index, so the UI
+   * reads them through monthColorHex() in lib/colors.ts rather than as
+   * utility classes.
+   */
+  --color-month-01: #ffa2a2;
+  --color-month-02: #ffb86a;
+  --color-month-03: #ffdf20;
+  --color-month-04: #bbf451;
+  --color-month-05: #7bf1a8;
+  --color-month-06: #46ecd5;
+  --color-month-07: #53eafd;
+  --color-month-08: #74d4ff;
+  --color-month-09: #8ec5ff;
+  --color-month-10: #a3b3ff;
+  --color-month-11: #c4b4ff;
+  --color-month-12: #f4a8ff;
+}
+
+@layer base {
+  html {
+    /* The pages are opened inside LINE's webview and are not zoomable there;
+       this keeps text scaling predictable on iOS when the device is rotated. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-neutral);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  /* Thai sets taller than Latin. The legacy pages relied on browser defaults
+     and the result is cramped in places; this is the baseline the redesign
+     builds on. Revisit with real Thai copy, not Latin placeholder text. */
+  :lang(th) {
+    line-height: 1.6;
+  }
+}
