@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url"
 import { dirname, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { MONTH_COLORS } from "../colors"
+import { DEPARTMENTS } from "../departments"
 import { THAI_MONTHS, THAI_MONTHS_SHORT, recentMonthKeys, toBE } from "../months"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -58,6 +59,27 @@ function loadBrowserShared(): {
 
 const browserShared = loadBrowserShared()
 
+/**
+ * Extract a top-level `const <name> = [ ... ]` array literal from a legacy
+ * page script. status/app.js and admin/app.js both hardcode the department
+ * list inside an IIFE with no export, so there is nothing to import — but the
+ * ordering is load-bearing (it is a hand-maintained Thai dictionary order that
+ * localeCompare does not reproduce), and a third copy of it is exactly the kind
+ * of thing that drifts silently.
+ *
+ * If the regex stops matching because the declaration was reformatted, this
+ * throws and the test fails loudly. That is the intended behaviour: re-point it
+ * at the new shape, or delete the copy.
+ */
+function extractArrayLiteral(relativePath: string, name: string): string[] {
+  const source = readFileSync(resolve(repoRoot, relativePath), "utf8")
+  const match = new RegExp(`const\\s+${name}\\s*=\\s*(\\[[^\\]]*\\])`).exec(source)
+  if (!match?.[1]) {
+    throw new Error(`could not find \`const ${name} = [...]\` in ${relativePath}`)
+  }
+  return JSON.parse(match[1]) as string[]
+}
+
 describe("src/constants.cjs (Express server + rich menu)", () => {
   it("has the same accent colours, in the same order", () => {
     expect(serverConstants.COLOR_ARRAY).toEqual(MONTH_COLORS.map((c) => [c.tw, c.hex]))
@@ -85,6 +107,18 @@ describe("src/constants.cjs (Express server + rich menu)", () => {
 
       expect(fromIterator, `starting month index ${m}`).toEqual(fromTs)
     }
+  })
+})
+
+describe("department list (three hardcoded copies)", () => {
+  // status/app.js drives the physician-facing grouping; admin/app.js drives the
+  // admin dashboard's department dropdown, where a mismatch would let an admin
+  // save a spelling the status page then fails to group.
+  it.each([
+    ["status/app.js", "dep_array"],
+    ["admin/app.js", "dep_array"],
+  ])("%s matches lib/departments.ts", (path, name) => {
+    expect(extractArrayLiteral(path, name)).toEqual([...DEPARTMENTS])
   })
 })
 

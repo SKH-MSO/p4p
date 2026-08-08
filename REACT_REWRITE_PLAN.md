@@ -1,8 +1,9 @@
 # React Rewrite Plan — P4P LIFF Front End
 
-**Status:** proposal, not yet implemented
-**Scope:** the four browser pages (`/verify/`, `/status/`, `/list/`, `/ranking/`), the shared
-browser helpers in `assets/`, and the HTTP surface of `main.js` (gate, session, webhooks).
+**Status:** Phase 0 implemented in [`web/`](web/). Phases 1–7 proposed.
+**Scope:** the four physician pages (`/verify/`, `/status/`, `/list/`, `/ranking/`), the
+**`/admin/` roster dashboard** (§1a), the shared browser helpers in `assets/`, and the HTTP
+surface of `main.js` (gate, session, admin API, webhooks).
 **Explicitly out of scope:** `automation/`, `process/`, `scripts/`, and every SQL migration.
 No database schema changes. The LINE Flex-message builders move file but keep their logic
 byte-for-byte.
@@ -38,11 +39,46 @@ layer. It is the code with the incident history, and it should be reviewable on 
 | Status page | `status/index.html` + `status/app.js` | 385 + 344 | Per-month sent/pending roster, search, group-by-department. |
 | List page | `list/index.html` + `list/app.js` | 337 + 318 | Month picker, sortable/paginated physician table. |
 | Ranking page | `ranking/index.html` + `ranking/app.js` | 325 + 152 | 24 month tabs, on-time submission timeline. |
+| **Admin dashboard** | `admin/index.html` + `admin/app.js` | 336 + 405 | Roster CRUD. Separate auth, no LIFF — see §1a. |
 | Shared browser | `assets/shared.js`, `assets/auth-guard.js` | 75 + 51 | Constants, `escHtml`, the client half of the auth gate. |
 | Shared server | `src/constants.cjs` | — | Month names + colors, duplicated from `assets/shared.js`. |
 
-No build step, no front-end tests, ~1,300 lines of CSS with the same design tokens
-copy-pasted into four files.
+No build step, no front-end tests, ~1,600 lines of CSS with the same design tokens
+copy-pasted into five files.
+
+### 1a. The admin dashboard is a different kind of page
+
+Added after the first version of this plan, so it is called out separately: `/admin/` shares
+almost none of the assumptions the other four pages are built on.
+
+| | The four physician pages | `/admin/` |
+|---|---|---|
+| Who | ~200 physicians | exactly one admin |
+| Opened in | LINE's webview only | **any mobile browser** — the gate is `/Mobi\|Android\|iPhone/`, not `Line/` |
+| LIFF | one registered LIFF app each | **none** |
+| Auth | Supabase OTP + session cookie + LINE bind | LINE DM → signed link → `p4p_admin` HMAC cookie |
+| Talks to Supabase | yes, from the browser, under RLS | **no** — browser only calls same-origin `/admin/api/*` |
+| Service-role key | never involved | held server-side by every `/admin/api/*` route |
+
+The auth flow: the admin DMs `admin` to the LINE bot; the webhook signature authenticates
+`event.source.userId` against `ADMIN_LINE_USER_ID`; the bot replies with a short-lived signed
+link; visiting `/admin/login?token=…` sets a 90-day HMAC session cookie. The tokens are
+stateless, signed with `LINE_CHANNEL_SECRET + ":" + SUPABASE_SERVICE_ROLE_KEY`, with the
+purpose mixed into the HMAC so a login token cannot be replayed as a session cookie.
+
+Two consequences that matter for the migration, both good:
+
+1. **It needs no staging LIFF app.** It can be built *and fully verified* on a plain Vercel
+   preview URL in a phone browser, today, with nothing pending in the LINE console. That
+   makes it the one page that can proceed while §5 is blocked — see §7.
+2. **It never touches Supabase from the browser**, so it is unaffected by the auth-guard,
+   token-injection and RLS machinery that dominates the other four pages. Its port is a
+   straight UI conversion plus six route handlers.
+
+The generic CRUD is driven by live column introspection (`admin_table_columns`), so the
+rewrite must stay schema-agnostic — the form fields are generated from `data_type`, not
+hardcoded. Do not "improve" this into a typed form for today's columns; new months are
+provisioned with whatever shape `provision_month()` gives them.
 
 ### The contract — behaviours that must survive the rewrite
 
@@ -54,9 +90,16 @@ These have incident history behind them (see the comment blocks in `main.js` and
    by a *different* LIFF app. `/verify` and `/verify/` are both served directly with **no
    redirect between them**, because that redirect destroyed LIFF's `#access_token=…` login
    fragment and produced an infinite reload loop.
-2. **Webhook and API paths.** `/line`, `/telegram/webhook`, `/auth/session`, `/line/bind`.
-   These are registered with LINE and Telegram externally; keeping them identical means no
-   re-registration at cutover, which is one less thing to get wrong during the window.
+2. **Webhook and API paths.** `/line`, `/telegram/webhook`, `/auth/session`, `/line/bind`,
+   plus the admin surface: `/admin/login`, `/admin/logout`, and
+   `/admin/api/tables[/:table/{columns,rows[/:index]}]`. These are registered with LINE and
+   Telegram externally; keeping them identical means no re-registration at cutover, which is
+   one less thing to get wrong during the window.
+
+   `ADMIN_BASE_URL` (default `https://p4p-sakhonmso.vercel.app`) is baked into the login link
+   the bot sends. It must point at whichever deployment is live, so it is a **cutover
+   checklist item**, and it must NOT be pointed at a preview while production is still on
+   Express — that would send the admin's login link to the wrong app.
 3. **LIFF app identity.** Each entry point is a separate LIFF app whose registered Endpoint
    URL must match the page it runs on: `2008561527-BXrxUUDb` and `2008561527-wyje9amz`
    (rich menu), `2008561527-a0xP1XmY` (month picker → `/status/`), `2008561527-AShTrJz0`
@@ -86,6 +129,10 @@ app/
   status/page.tsx           → /status/
   list/page.tsx             → /list/
   ranking/page.tsx          → /ranking/
+  admin/page.tsx            → /admin/   (own auth, no LIFF — §1a)
+  admin/login/route.ts      → GET  /admin/login
+  admin/logout/route.ts     → POST /admin/logout
+  admin/api/…/route.ts      → the six roster CRUD endpoints
   auth/session/route.ts     → POST /auth/session
   line/route.ts             → POST /line            (LINE bot webhook)
   line/bind/route.ts        → POST /line/bind
@@ -93,6 +140,7 @@ app/
 middleware.ts               ← the gate + CSP nonce + URL canonicalisation
 lib/
   gate/                     cookies, token refresh, gate RPC, bind-loop backstop
+  admin/                    HMAC token sign/verify, service-role RPC helper
   line/                     LIFF helpers, Flex builders (moved from main.js verbatim)
   months.ts colors.ts departments.ts
 components/                 the design system (§4)
@@ -119,7 +167,15 @@ reaching the browser, and no `fs.readFileSync` of HTML at module load.
 **Runtime note.** Middleware must resolve the token and call the gate RPC — both plain
 `fetch`, both Edge-safe. The JWT payload read is `atob` + `JSON.parse`, also Edge-safe. The
 service-role key stays out of middleware entirely; it is only needed in
-`app/line/bind/route.ts` and `app/telegram/webhook/route.ts`, which run on the Node runtime.
+`app/line/bind/route.ts`, `app/telegram/webhook/route.ts` and every `app/admin/api/*`
+route — all Node runtime.
+
+**The admin routes do not go through the physician gate.** `requireAdmin` is its own check
+against the `p4p_admin` cookie, and the middleware matcher must exclude `/admin/*` so an
+admin is never bounced to `/verify/`. Keep the two auth systems textually separate in
+`lib/gate/` and `lib/admin/`; they answer different questions and share nothing but the
+cookie-parsing helper. The admin HMAC needs `crypto.timingSafeEqual`, which is Node-only —
+another reason those routes are not Edge.
 
 ### `/verify` and `/verify/` with no redirect
 
@@ -215,7 +271,9 @@ Vercel preview alias (e.g. `p4p-next.vercel.app`), mirroring the four production
 cost nothing, live alongside the existing apps, and mean every page is exercised in the real
 LINE client — real webview, real ID tokens, real `openid` scope behaviour — before cutover.
 
-This is a Phase 0 task and everything downstream depends on it.
+This is a Phase 0 task and everything downstream depends on it — **except `/admin/`**, which
+uses no LIFF app at all and can be verified on the preview URL in any phone browser (§1a).
+That is why it moves ahead of the physician pages in §7.
 
 **Webhooks stay pointed at production during staging.** Do not re-register the LINE bot or
 Telegram webhook at the preview URL; that would double-handle live events. Exercise those two
@@ -266,9 +324,32 @@ bind-loop backstop, CSP nonce) and the four route handlers. Logic transcribed fr
 with comments carried across; no behaviour changes, no view work. *Exit: unit tests cover
 every gate branch, and the nonce CSP is verified in a browser with no `unsafe-inline`.*
 
-**Phase 2 — design system + `/status/`.** The densest page, built first so the system is
-exercised properly rather than designed against the easiest case. Includes the redesign
-sign-off gate from §4. *Exit: reviewed on a real device in LINE via staging LIFF.*
+**Phase 1a — `/admin/` (unblocked; can run in parallel).** The admin dashboard needs no
+staging LIFF app and no redesign sign-off, so it is the one page that can be built and fully
+verified while Phase 0's LINE-console task and Phase 2's design gate are both outstanding.
+Six route handlers plus a schema-agnostic CRUD form. It also exercises the CSP nonce, the
+Node-runtime routes and the service-role plumbing end to end on a real deployment, which
+de-risks Phase 1 for everything else. *Exit: full CRUD against a real roster table from a
+phone browser on the preview URL.*
+
+Two things to settle during this phase rather than carry across silently:
+
+- The `p4p_admin` cookie is a stateless 90-day bearer token. There is no revocation short of
+  rotating `LINE_CHANNEL_SECRET` or `SUPABASE_SERVICE_ROLE_KEY`, which would break the rest of
+  the system. For a single-admin internal tool that is a defensible trade, but a lost or
+  handed-down phone keeps write access to every roster table for up to 90 days. A shorter
+  expiry, or a revocable server-side session, is cheap to add while the code is being
+  rewritten anyway. **Needs a decision, not a default.**
+- `admin/app.js` hardcodes its own copy of the department list and its own `escHtml`. Both
+  are already covered by the parity guard in Phase 0; they simply disappear here.
+
+**Phase 2 — design system + `/status/`.** The densest physician page, built first so the
+system is exercised properly rather than designed against the easiest case. Includes the
+redesign sign-off gate from §4. *Exit: reviewed on a real device in LINE via staging LIFF.*
+
+Whether `/admin/` adopts the same redesign is a separate question — it has one user, a
+different information density, and is not opened in LINE. Porting it as-is in Phase 1a and
+revisiting the styling later is the cheaper order.
 
 **Phase 3 — `/list/`.** Pagination, sorting, search. Removes the largest concentration of
 `innerHTML` in the codebase.
@@ -285,8 +366,10 @@ state machine. This is also where the `/verify` vs `/verify/` rewrite gets confi
 **Phase 6 — cutover.** See §9.
 
 **Phase 7 — decommission.** Delete `main.js`, `verify/`, `status/`, `list/`, `ranking/`,
-`assets/`, `src/constants.cjs`. Rewrite `eslint.config.mjs` (its browser-globals block and
-`supabase`/`liff`/`P4P` globals become meaningless). Retire the staging LIFF apps.
+`admin/`, `assets/`, `src/constants.cjs`. Rewrite `eslint.config.mjs` (its browser-globals
+block and `supabase`/`liff`/`P4P` globals become meaningless). Delete the parity guard in
+`web/lib/__tests__/parity.test.ts` along with the legacy sources it watches. Retire the
+staging LIFF apps.
 
 ---
 
@@ -305,6 +388,15 @@ phase, so it is visible in review rather than buried in a rewrite diff:
 - **`status/app.js:54`** — `arr` and `count_true` are module-level mutable state, never reset.
   Single-load pages today; a bug the moment components mount and unmount.
 - **`list/app.js:69`** — the clock `setInterval` is never cleared.
+- **`admin/app.js:119,166,204`** — timestamps are shown in the *device's* timezone
+  (`toLocalInputValue` and `toLocaleString("th-TH")`) and parsed back from it
+  (`new Date(v).toISOString()`). Those two are exact inverses, so a field the admin does not
+  touch round-trips losslessly — no silent corruption. The bug is narrower: on a non-Bangkok
+  device the admin *reads* `submitted_at` shifted by their offset, and if they then type a
+  time meaning Bangkok, it is stored shifted. Read-only on the ranking page, but here it can
+  be written, so fix it with the same `Asia/Bangkok` formatting.
+- **`admin/app.js`** — a third hardcoded copy of the department list, and a third copy of
+  `escHtml`. Both are covered by the Phase 0 parity guard until they are deleted in Phase 1a.
 
 ---
 
@@ -322,11 +414,14 @@ cutover).
 3. Promote to production.
 4. Update the four **production** LIFF Endpoint URLs only if any path changed. It should not
    have; if step 4 is a no-op, the migration is correct.
-5. Smoke test in this order: `/verify/` OTP → bind → redirect to `/status/`; then `/list/`,
-   `/ranking/`; then a real LINE bot `status` message; then a Telegram approve button.
-6. Watch Vercel logs for `[gate]`, `[line-bind]`, `[bind-loop]` and `[tg-webhook]` lines for
-   the first hour — the existing log prefixes are preserved specifically so this step works.
-7. Confirm fresh rows in `line_verified_sessions`.
+5. Point `ADMIN_BASE_URL` at production (it should already be — confirm rather than assume).
+6. Smoke test in this order: `/verify/` OTP → bind → redirect to `/status/`; then `/list/`,
+   `/ranking/`; then a real LINE bot `status` message; then DM `admin` to the bot, follow the
+   link, and do one read plus one edit in the dashboard; then a Telegram approve button.
+7. Watch Vercel logs for `[gate]`, `[line-bind]`, `[bind-loop]`, `[tg-webhook]` and `[admin]`
+   lines for the first hour — the existing log prefixes are preserved specifically so this
+   step works.
+8. Confirm fresh rows in `line_verified_sessions`.
 
 **Rollback:** promote the previous Vercel deployment. Because the paths and webhook
 registrations are unchanged, rollback is one click and needs no LINE-console edits. That
@@ -340,6 +435,8 @@ property is worth protecting — it is the main reason §2 insists the paths sta
 |---|---|---|
 | Gate | Vitest | Every branch of the middleware: no cookie, expired refresh, blocked, revoked, bind-required under/over the limit, loop-backstop tripped, gate RPC unreachable in both `LINE_BIND_ENFORCE` modes. Zero coverage today; the branches that lock people out. |
 | Webhooks | Vitest | LINE signature valid/invalid/missing; Telegram secret mismatch; `callback_query` parsing. |
+| Admin auth | Vitest | HMAC sign/verify round-trip; expired token; tampered signature; a `login` token rejected as a `session` cookie and vice versa (the purpose separation); `requireAdmin` with no cookie. |
+| Admin API | Vitest | `assertRosterTable` rejecting a non-roster table name; `filterToColumns` dropping unknown keys and the PK. These two are the only thing standing between a client-controlled body and a service-role write. |
 | Pure logic | Vitest | `months.ts` (BE conversion, 6- and 24-month windows, the `2569_04` floor, deadlines), department sort order, filter/sort/pagination. |
 | Components | Vitest + RTL | `OtpInput` (type, paste, backspace, arrows, bulk autofill), status view-mode transitions, list pagination edges. |
 | Bind flow | Vitest + RTL | Mocked `/line/bind`: success, `403 mismatch`, failure under the limit, failure at the limit. |
@@ -361,6 +458,8 @@ The existing `automation/test/*` suite (`node:test`) is untouched and keeps runn
 | Redesign scope creeps and delays the migration. | One sign-off gate on one screen (§4), before three of the four pages are built. |
 | Cutover lands mid-submission-window. | Scheduled outside the 1st–15th; rollback is a single Vercel promotion (§9). |
 | Rewriting the gate reintroduces a lockout. | It is transcribed, not redesigned; comments carried across; every branch unit-tested; `LINE_BIND_ENFORCE` untouched during the cutover. |
+| An admin API route ends up reachable without `requireAdmin`. | Every one of them holds the service-role key. Unit-test each route's unauthenticated path, and keep the middleware matcher's `/admin/*` exclusion covered by a test so it cannot be widened by accident. |
+| `ADMIN_BASE_URL` points at the wrong deployment. | The bot's login link is built from it. Cutover checklist item (§9); never set it to a preview while production is on Express. |
 
 ---
 
@@ -370,14 +469,34 @@ The existing `automation/test/*` suite (`node:test`) is untouched and keeps runn
 |---|---|
 | 0 — scaffold, Tailwind theme, lib, staging LIFF, CI | 2 days |
 | 1 — gate, middleware, CSP nonce, webhooks | 2–3 days |
+| 1a — `/admin/` + six route handlers | 2 days |
 | 2 — design system + `/status/` (incl. sign-off) | 3 days |
 | 3 — `/list/` | 1.5 days |
 | 4 — `/ranking/` | 1 day |
 | 5 — `/verify/` | 2 days |
 | 6 — cutover + monitoring | 0.5 day |
 | 7 — decommission, lint config | 0.5 day |
-| **Total** | **~12–13 days** |
+| **Total** | **~14–15 days** |
 
-Roughly double the Vite-only estimate in the first draft. The increase is the gate rewrite
-(~3 days) and the redesign (~3 days) — both deliberate, both consequences of decisions 1
-and 2 rather than scope creep.
+The first draft estimated ~6–7 days for a Vite-only port. The increase is the gate rewrite
+(~3 days), the redesign (~3 days) and now the admin dashboard (~2 days) — all three are
+consequences of decisions or of scope that already exists, not scope creep.
+
+Note that 1a is **not on the critical path**: it is the only phase that can start
+immediately, so in elapsed time it costs nothing if it runs while the LINE-console and
+design-sign-off tasks are outstanding.
+
+---
+
+## 13. Open decisions
+
+Everything else in this plan is settled. These two are not, and both are cheap now and
+awkward later:
+
+1. **How long should an admin session last?** The `p4p_admin` cookie is a stateless 90-day
+   bearer token with no revocation path short of rotating a secret the rest of the system
+   depends on (§7, Phase 1a). A shorter expiry or a revocable server-side session is a small
+   change while the code is being rewritten anyway.
+2. **Does `/admin/` adopt the redesign?** One user, different density, not opened in LINE.
+   Porting it as-is in Phase 1a and revisiting later is the cheaper order, but that is a
+   preference, not a constraint.
