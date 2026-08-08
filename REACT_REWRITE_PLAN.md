@@ -1,11 +1,31 @@
 # React Rewrite Plan — P4P LIFF Front End
 
 **Status:** proposal, not yet implemented
-**Scope:** the four browser pages (`/verify/`, `/status/`, `/list/`, `/ranking/`) and the
-shared browser helpers in `assets/`.
-**Explicitly out of scope:** `automation/`, `process/`, `scripts/`, the LINE bot handlers
-and Flex-message builders in `main.js`, and every SQL migration. None of those are
-front-end code and none of them change here.
+**Scope:** the four browser pages (`/verify/`, `/status/`, `/list/`, `/ranking/`), the shared
+browser helpers in `assets/`, and the HTTP surface of `main.js` (gate, session, webhooks).
+**Explicitly out of scope:** `automation/`, `process/`, `scripts/`, and every SQL migration.
+No database schema changes. The LINE Flex-message builders move file but keep their logic
+byte-for-byte.
+
+---
+
+## 0. Decisions taken
+
+Three questions were open in the first draft. All three are now answered **yes**, and they
+reshape the plan considerably:
+
+| # | Decision | Consequence |
+|---|---|---|
+| 1 | **Next.js is the target**, not a later option | The Express server is replaced, not preserved. The gate becomes middleware. This is now the largest and riskiest part of the work, so it moves early rather than being avoided. |
+| 2 | **Visual redesign is in scope** | No pixel-faithful CSS port. The four pages get one shared design system instead of four divergent stylesheets. Styling recommendation flips from CSS Modules to Tailwind (§4). |
+| 3 | **`/verify/` can take a maintenance window** | A single clean cutover beats a hybrid Express/Next deployment. Combined with staging LIFF apps (§5), this removes most of the deployment risk. |
+
+Decision 1 removes the main argument the first draft made for Vite, and decision 2 removes
+the main argument it made for CSS Modules. Both recommendations are therefore reversed here
+on purpose — the reasoning behind them was conditional, and the conditions changed.
+
+One thing does **not** change: the gate rewrite stays its own phase, separate from the view
+layer. It is the code with the incident history, and it should be reviewable on its own.
 
 ---
 
@@ -21,279 +41,343 @@ front-end code and none of them change here.
 | Shared browser | `assets/shared.js`, `assets/auth-guard.js` | 75 + 51 | Constants, `escHtml`, the client half of the auth gate. |
 | Shared server | `src/constants.cjs` | — | Month names + colors, duplicated from `assets/shared.js`. |
 
-Every page is hand-written DOM manipulation with a large inline `<style>` block. There is
-no build step, no test coverage on the front end, and roughly 1,300 lines of CSS with the
-same design tokens copy-pasted into four files.
+No build step, no front-end tests, ~1,300 lines of CSS with the same design tokens
+copy-pasted into four files.
 
-### The parts that are load-bearing
+### The contract — behaviours that must survive the rewrite
 
-These behaviours have incident history behind them (see the comment blocks in `main.js`
-and `verify/app.js`, and the `2026-08` notes). The rewrite must preserve them exactly —
-they are a **contract**, not implementation detail:
+These have incident history behind them (see the comment blocks in `main.js` and
+`verify/app.js`, and the `2026-08` notes). They are requirements, not implementation detail:
 
-1. **URL shapes.** `/status/`, `/list/`, `/ranking/` are served at the trailing-slash form
-   with a 302 from the bare path that appends a literal `#`. `/verify` and `/verify/` are
-   both served directly with **no** redirect between them, because that redirect destroyed
-   LIFF's `#access_token=…` login fragment and produced an infinite reload loop.
-2. **Token injection.** Every page ships `<meta name="p4p-session" content="__P4P_ACCESS_TOKEN__">`.
-   The server string-replaces the placeholder per request. The browser never persists a
-   Supabase session — LINE's in-app webview is unreliable at it.
+1. **URL shapes.** `/status/`, `/list/`, `/ranking/` serve at the trailing-slash form, with a
+   302 from the bare path that appends a **literal `#`** — this clears a stale fragment left
+   by a *different* LIFF app. `/verify` and `/verify/` are both served directly with **no
+   redirect between them**, because that redirect destroyed LIFF's `#access_token=…` login
+   fragment and produced an infinite reload loop.
+2. **Webhook and API paths.** `/line`, `/telegram/webhook`, `/auth/session`, `/line/bind`.
+   These are registered with LINE and Telegram externally; keeping them identical means no
+   re-registration at cutover, which is one less thing to get wrong during the window.
 3. **LIFF app identity.** Each entry point is a separate LIFF app whose registered Endpoint
    URL must match the page it runs on: `2008561527-BXrxUUDb` and `2008561527-wyje9amz`
    (rich menu), `2008561527-a0xP1XmY` (month picker → `/status/`), `2008561527-AShTrJz0`
-   (`/verify/`). Changing a path means editing the LINE Developers console, the rich menu,
-   and the Flex month picker in lockstep.
-4. **The bind flow's fail-open.** Three recorded failures then let the user through;
-   a `mismatch` never counts toward that limit; a retry re-uses the same access token and
-   never re-runs `verifyOtp` (OTP codes are single-use).
-5. **CSP with no `unsafe-inline` on scripts.** All page JS is external for exactly this reason.
-6. **Thai copy, verbatim.** Including the desktop/non-LINE block, which swaps its wording
-   when the UA is mobile-but-not-LINE.
-7. Smaller ones: the 5 s loading-dot delay on the email input, the six-box OTP
-   paste/backspace/arrow behaviour, `p4p_verify_pending` in `localStorage` with a 15-minute
-   TTL, the `p4p_bindloop` cookie backstop.
+   (`/verify/`).
+4. **Token never persists client-side.** LINE's in-app webview is unreliable at it. The
+   server resolves the access token per request and hands it to the page.
+5. **The bind flow's fail-open.** Three recorded failures then let the user through; a
+   `mismatch` never counts toward that limit; a retry re-uses the same access token and never
+   re-runs `verifyOtp` (OTP codes are single-use).
+6. **The `p4p_bindloop` cookie backstop.** Pure server state, deliberately independent of
+   Supabase, LINE, and client JS. Port it as-is.
+7. **`LINE_BIND_ENFORCE` staged rollout semantics**, including the detect-only fail-open.
+8. **No `unsafe-inline` on `script-src`.** See §6 — Next.js makes this harder, not easier.
+9. **Thai copy.** Wording is reviewed and in production use. A redesign changes layout and
+   visual language; it does not silently reword the UI.
 
 ---
 
-## 2. Framework choice
+## 2. Target architecture
 
-### Recommendation: Vite + React + TypeScript, four HTML entry points, Express untouched
+**Next.js (App Router) + TypeScript, deployed on Vercel, replacing the Express server.**
 
-Build the front end with Vite in multi-page mode, emitting `dist/verify/index.html`,
-`dist/status/index.html`, `dist/list/index.html`, `dist/ranking/index.html`. Keep `main.js`
-as the server; the only change it needs is reading its page templates and static assets
-from `dist/` instead of the four source directories.
+```
+app/
+  layout.tsx
+  verify/page.tsx           → /verify   (+ /verify/ via middleware rewrite)
+  status/page.tsx           → /status/
+  list/page.tsx             → /list/
+  ranking/page.tsx          → /ranking/
+  auth/session/route.ts     → POST /auth/session
+  line/route.ts             → POST /line            (LINE bot webhook)
+  line/bind/route.ts        → POST /line/bind
+  telegram/webhook/route.ts → POST /telegram/webhook
+middleware.ts               ← the gate + CSP nonce + URL canonicalisation
+lib/
+  gate/                     cookies, token refresh, gate RPC, bind-loop backstop
+  line/                     LIFF helpers, Flex builders (moved from main.js verbatim)
+  months.ts colors.ts departments.ts
+components/                 the design system (§4)
+```
 
-**Why this over Next.js.** Next.js is the more idiomatic answer on Vercel and would let the
-gate live in server components. But the gate is the single most fragile part of this
-codebase — cookie rotation, refresh-token reuse detection, the LIFF fragment, the
-redirect-loop backstop, the staged `LINE_BIND_ENFORCE` rollout — and it has already caused
-two production lockouts. A ground-up React rewrite that *also* reimplements that logic
-against a different request/response model doubles the risk of the riskiest area for no
-user-visible gain. Vite keeps the blast radius inside the view layer, where the rewrite
-actually pays off.
+### The gate becomes middleware
 
-Multi-page (not SPA routing) is deliberate: the four URLs are registered externally in the
-LINE console, and a client-side router would change how the LIFF login fragment is handled
-on first load. Four independent entry points reproduce today's navigation model exactly.
+`servePage()` maps almost one-to-one onto a Next middleware. The order of operations is
+identical, which is the point — this should read as a transcription, not a redesign:
 
-**If Next.js is wanted anyway,** it is a viable Phase 6 after the view layer lands: the
-pages would already be React by then, so it becomes a routing/hosting migration rather than
-a rewrite, and can be judged on its own. It is not a prerequisite for anything below.
+| `main.js` today | Next equivalent |
+|---|---|
+| trailing-slash redirect with literal `#` | `NextResponse.redirect` in middleware, same literal `#` |
+| `resolveAccessToken` (cached `at`, refresh near expiry, rotate cookie) | same logic in `lib/gate`, `fetch` instead of `axios` |
+| `getLineBindGateStatus` RPC | same, `fetch` |
+| `is_blocked` / `session_revoked` / `wantsBindRedirect` branches | same, unchanged |
+| `p4p_bindloop` cookie backstop | same, `NextResponse.cookies` |
+| `pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at)` | **deleted** — middleware forwards the token as an `x-p4p-access-token` request header; the Server Component reads it via `headers()` and passes it to the client component as a prop |
 
-### Dependencies to add
+Dropping the string-replace placeholder is the one genuine improvement the migration buys on
+the server side: no `__P4P_ACCESS_TOKEN__` sentinel, no risk of an un-replaced placeholder
+reaching the browser, and no `fs.readFileSync` of HTML at module load.
+
+**Runtime note.** Middleware must resolve the token and call the gate RPC — both plain
+`fetch`, both Edge-safe. The JWT payload read is `atob` + `JSON.parse`, also Edge-safe. The
+service-role key stays out of middleware entirely; it is only needed in
+`app/line/bind/route.ts` and `app/telegram/webhook/route.ts`, which run on the Node runtime.
+
+### `/verify` and `/verify/` with no redirect
+
+Next's `trailingSlash` config canonicalises with a 308 either way, which is exactly the
+redirect that broke LIFF login. The fix is a middleware **rewrite** (internal, no navigation,
+no `Location` header) so both paths render the same route. *This needs confirming on staging
+before Phase 5 — it is the single most likely place for the old bug to reappear.*
+
+### Webhook handlers
+
+`line.middleware(config)` from `@line/bot-sdk` is Express-shaped and does not survive.
+Replace it with the SDK's standalone `validateSignature(rawBody, channelSecret, signature)`
+against the `x-line-signature` header, reading the raw body via `await req.text()` before
+parsing. `export const runtime = "nodejs"` on that route.
+
+The Telegram handler already does its own secret-header comparison and needs no signature
+work — but keep the comment explaining why it responds only *after* all outbound calls
+finish. That comment documents a real Vercel freeze-on-response bug and applies equally to
+route handlers.
+
+---
+
+## 3. Dependencies
 
 | Package | Why |
 |---|---|
-| `vite`, `@vitejs/plugin-react` | Build + dev server. |
-| `react`, `react-dom`, `typescript` | The rewrite. |
-| `@supabase/supabase-js` | **npm, not the jsDelivr UMD bundle.** Removes `cdn.jsdelivr.net` from `script-src` and the SRI-pinning maintenance. |
-| `@line/liff` | **npm, not `static.line-scdn.net`.** Removes the one CDN script we cannot SRI-pin, because LINE requires the unversioned auto-updating URL. Needs a compatibility check against the LINE client before `/verify/` ships. |
-| `@tanstack/react-query` | Ranking has 24 month tabs and refetches on every tab click today. Query caching is the one place a data library earns its weight. |
+| `next`, `react`, `react-dom`, `typescript` | The rewrite. |
+| `@supabase/supabase-js` | **npm, not the jsDelivr UMD bundle.** Removes a CDN origin and the SRI-pinning maintenance. |
+| `@line/liff` | **npm, not `static.line-scdn.net`.** Removes the one CDN script that *cannot* be SRI-pinned, because LINE requires its unversioned auto-updating URL. Needs a compatibility check against the real LINE client in Phase 0 — if it diverges, keep the CDN tag and leave that origin in the CSP. |
+| `@line/bot-sdk` | Kept, for `validateSignature` and `MessagingApiClient`. |
+| `tailwindcss` | See §4. |
+| `@radix-ui/react-{select,tabs,collapsible}` | Three genuinely fiddly widgets, correct keyboard/ARIA behaviour for free. Not a full component framework. |
+| `@tanstack/react-query` | Ranking has 24 month tabs and refetches on every tab click today. |
 | `vitest`, `@testing-library/react`, `jsdom` | Front-end tests, which currently do not exist. |
+| `zod` | Validating the `sheetname` URL param and webhook payload shapes. |
 
-Net CSP after the rewrite: `script-src 'self'` only. That is a real security improvement
-and it falls out of the build step rather than being extra work.
-
-### Styling
-
-CSS Modules over a utility framework. The existing CSS is already written, already matches
-`design.md`, and porting it faithfully is the goal of Phase 1–4; a Tailwind conversion would
-mean rewriting 1,300 lines of visual code at the same time as the logic, which makes any
-visual regression impossible to attribute. Structure:
-
-```
-src/styles/tokens.css      # the :root block, defined once instead of four times
-src/styles/base.css        # reset, body, fonts, .skeleton, spinner keyframes
-src/components/**/*.module.css
-```
-
-Fonts stay on Google Fonts initially. Self-hosting the Sarabun/Noto woff2 already in
-`src/fonts/` would drop two more origins from the CSP — worth doing, but as its own change.
+`express` and `axios` are dropped.
 
 ---
 
-## 3. Target structure
+## 4. Design system (redesign in scope)
+
+Today the four pages look like three different products: `/status/` has a bare header,
+`/list/` has a brand header with a live clock and a footer, `/ranking/` has a hero band with
+scrolling tabs. Unifying them is most of the value of decision 2.
+
+**Tailwind, not CSS Modules.** The first draft recommended CSS Modules specifically so a
+pixel-faithful port would keep visual regressions attributable. With a redesign in scope
+there is no port to be faithful to — every rule is being rewritten regardless — and
+Tailwind's constraint-based scale is the better fit for building one consistent system
+across four pages. `design.md`'s tokens become the Tailwind theme, so the palette,
+type scale and radius have exactly one definition:
 
 ```
-src/
-  entries/
-    verify/main.tsx        index.html lives at src/entries/verify/index.html
-    status/main.tsx
-    list/main.tsx
-    ranking/main.tsx
-  app/
-    VerifyPage.tsx
-    StatusPage.tsx
-    ListPage.tsx
-    RankingPage.tsx
-  components/
-    DesktopBlock.tsx       the "open in LINE" full-screen block, all four pages
-    BackToTop.tsx
-    Spinner.tsx
-    StateBox.tsx           loading / empty / error, shared by list + ranking
-    OtpInput.tsx           the six-box control, with its paste/backspace behaviour
-  hooks/
-    useInjectedToken.ts    reads <meta name="p4p-session">, redirects if absent
-    useSupabase.ts         builds the client from the injected token
-    useLineOnly.ts         the UA guard
-    useMonthTable.ts       react-query wrapper over db.from(<YYYY_MM>)
-  lib/
-    months.ts              BE conversion, month keys, Thai labels, 6/24-month windows, deadlines
-    colors.ts              COLOR_ARRAY
-    departments.ts         the Thai department order used for sorting
-    liff.ts                init + getIDToken, with the error-description helper
-    errors.ts              describeError()
-  styles/
+--color-primary: #A68966    --font-display: Manrope
+--color-secondary: #4B3D33  --font-body: Work Sans / Noto Sans Thai Looped
+--color-tertiary: #F5F5F0   --radius: 4px
+--color-neutral: #FAF9F6
 ```
+
+**Shared shell.** One `AppHeader` (brand, month context, live status dot), one page frame,
+one `BackToTop`, one `StateBox` covering loading/empty/error, one skeleton treatment. These
+exist four times today in four slightly different forms.
+
+**Constraints the design must respect.** Mobile-only, portrait, inside LINE's webview.
+Thai text sets taller than Latin, so line-height and touch targets need to be checked in
+Thai, not in English lorem. Bundle size matters more than usual — the audience is on hospital
+wifi and mobile data.
+
+**What needs sign-off before Phase 2 starts.** The redesign direction itself. This plan
+commits to *one coherent system built on the existing tokens*; it does not choose a new
+visual language unilaterally. Suggested deliverable: a single annotated screen (the
+`/status/` page, the densest one) reviewed before the other three are built.
+
+**Deliberately not doing:** dark mode. `design.md` specifies a light-optimised system, and
+LINE's webview does not reliably signal theme. Revisit separately if asked.
 
 **Deduplication.** `COLOR_ARRAY` and the Thai month names currently exist in both
-`src/constants.cjs` (server) and `assets/shared.js` (browser). They become one TypeScript
-module; `main.js` keeps requiring a thin `src/constants.cjs` shim that re-exports the built
-values, so the server needs no change beyond that. `escHtml` disappears entirely — React
-escapes by default, and every one of its call sites is a template-string `innerHTML` that
-becomes JSX.
+`src/constants.cjs` and `assets/shared.js`. They collapse into one TypeScript module imported
+by both the pages and the Flex builders. `escHtml` disappears entirely — React escapes by
+default, and every call site is a template-string `innerHTML` becoming JSX.
 
 ---
 
-## 4. Phasing
+## 5. Staging LIFF apps — the thing that makes this safe
 
-Each phase is independently shippable and independently revertible (one route in `main.js`
-points at either the old directory or `dist/`). Ship one, watch it in production, then start
-the next.
+A Vercel preview deployment cannot be opened from LINE, because a LIFF app only runs at its
+registered Endpoint URL. Without solving that, every change is verified for the first time in
+production, in front of ~200 physicians.
 
-**Phase 0 — scaffold, no behaviour change.**
-Vite config with four entries, TypeScript, tokens/base CSS, `src/lib/*` ported with unit
-tests, Vitest wired into CI alongside the existing `automation-tests.yml`. Nothing is served
-from `dist/` yet. *Verification: `npm run build` produces four HTML files each containing the
-`__P4P_ACCESS_TOKEN__` placeholder and no inline `<script>`.*
+**Register four staging LIFF apps** in the LINE Developers console pointing at a stable
+Vercel preview alias (e.g. `p4p-next.vercel.app`), mirroring the four production ones. They
+cost nothing, live alongside the existing apps, and mean every page is exercised in the real
+LINE client — real webview, real ID tokens, real `openid` scope behaviour — before cutover.
 
-**Phase 1 — `/ranking/`.**
-Smallest page (152 lines of JS, one query, no forms) and therefore the right one to prove the
-whole pipeline in production: build output, token injection into a Vite-generated HTML file,
-CSP with bundled Supabase, LIFF-less operation. Also fix the timezone bug noted in §6.
-*Verification: side-by-side against the live page on a real device in LINE, all 24 tabs.*
+This is a Phase 0 task and everything downstream depends on it.
 
-**Phase 2 — `/list/`.**
-Pagination, sorting, search, the mobile/desktop dual rendering. Mostly a mechanical
-conversion of string templates to JSX, and it removes the largest concentration of
-`innerHTML` in the codebase.
-
-**Phase 3 — `/status/`.**
-Most DOM logic (search modes, department grouping, the pending/sent `<details>` sections).
-State that is currently five interdependent `style.display` assignments collapses to one
-`viewMode` discriminated union — the clearest single readability win in the rewrite.
-
-**Phase 4 — `/verify/`.**
-Last, on purpose. Highest risk and lowest structural payoff: OTP, access requests, the LIFF
-bind flow with its retry/fail-open/mismatch branches, and the injected-token early return.
-Port it as a literal state machine (`email → code → request → bind`) with every existing
-comment carried across, and test the bind branches with a mocked `/line/bind`.
-*Verification: a real end-to-end bind on a device, confirmed by a new row in
-`line_verified_sessions`, before the old page is deleted.*
-
-**Phase 5 — cleanup.**
-Delete `verify/`, `status/`, `list/`, `ranking/`, `assets/shared.js`, `assets/auth-guard.js`.
-Tighten the CSP to `script-src 'self'`. Update `eslint.config.mjs` (the browser-globals block
-and its `supabase`/`liff`/`P4P` globals become unnecessary). Update `.github/workflows` if any
-reference the old paths.
-
-**Phase 6 — optional, separate decision.** Next.js migration, if still wanted.
+**Webhooks stay pointed at production during staging.** Do not re-register the LINE bot or
+Telegram webhook at the preview URL; that would double-handle live events. Exercise those two
+route handlers with synthetic signed requests in tests instead. Because their paths are
+unchanged, cutover needs no webhook re-registration at all.
 
 ---
 
-## 5. Server and deploy changes
+## 6. CSP: Next.js makes this harder, and it needs handling deliberately
 
-`main.js` needs three edits, all small:
+Today's `script-src 'self' https://cdn.jsdelivr.net https://static.line-scdn.net` has **no
+`unsafe-inline`**, and the comment in `main.js` is explicit that all page JS was moved to
+external files to earn that. Next.js emits inline bootstrap and RSC-payload scripts, so a
+naive migration would force `'unsafe-inline'` back in and quietly undo it.
 
-```js
-// 1. templates come from the build output
-const DIST = path.join(__dirname, "dist")
-pageTemplates[p] = fs.readFileSync(path.join(DIST, p, "index.html"), "utf8")
+The supported fix is a **per-request nonce generated in middleware**: middleware sets both
+the `Content-Security-Policy` and an `x-nonce` header, and Next applies that nonce to the
+scripts it injects. Two documented consequences, both acceptable here:
 
-// 2. same for the verify template
-const verifyTemplate = fs.readFileSync(path.join(DIST, "verify", "index.html"), "utf8")
+- **It forces dynamic rendering.** Static optimisation and ISR are disabled. The gated pages
+  already must be dynamic — they carry a per-request access token — so nothing is lost.
+- **The middleware matcher should exclude static assets and prefetches**, or every image
+  request pays for CSP processing.
 
-// 3. static mounts point at dist
-app.use("/status", express.static(path.join(DIST, "status")))
-// …and an /assets mount for Vite's hashed bundles
+End state, once both CDN script origins are gone (§3):
+
+```
+script-src 'self' 'nonce-<per-request>'
 ```
 
-The redirect logic, cookie handling, gate RPC, and `/line/bind` are untouched.
+Strictly better than today. But it is a Phase 1 requirement, not a cleanup task — shipping
+without it is a security regression against the current app.
 
-`vercel.json`: `includeFiles` becomes `["dist/**"]`, and the build runs via a `vercel-build`
-script in `package.json` (the `@vercel/node` builder executes it). *This is the one deploy-
-config change that cannot be verified locally — it needs a Vercel preview deployment before
-Phase 1 merges.* If `vercel-build` turns out not to fire under the legacy `builds` array, the
-fallback is migrating `vercel.json` to `buildCommand` + `outputDirectory` + `rewrites`, which
-is cleaner anyway but is a larger config change.
+Sources: [Next.js CSP guide](https://nextjs.org/docs/app/guides/content-security-policy) ·
+[nonce setup walkthrough](https://centralcsp.com/articles/how-to-setup-nonce-with-nextjs)
 
 ---
 
-## 6. Bugs to fix during the port
+## 7. Phasing
 
-Found while reading the current code. Each is small, and each should land as its own commit
-inside the relevant phase so it is visible in the diff rather than buried in a rewrite:
+**Phase 0 — foundations.** Next scaffold, TypeScript, Tailwind theme from `design.md`, shared
+`lib/` ported with unit tests, Vitest in CI alongside the existing `automation-tests.yml`,
+`@line/liff` npm compatibility check, **four staging LIFF apps + stable preview alias**.
+*Exit: a placeholder page opens inside LINE from a staging LIFF app.*
 
-- **`status/app.js:23`** — `par_sheetname` goes straight into `db.from()` with no validation.
-  It should be checked against `/^\d{4}_\d{2}$/` before use.
+**Phase 1 — gate and API surface.** Middleware (canonicalisation, session, gate RPC,
+bind-loop backstop, CSP nonce) and the four route handlers. Logic transcribed from `main.js`
+with comments carried across; no behaviour changes, no view work. *Exit: unit tests cover
+every gate branch, and the nonce CSP is verified in a browser with no `unsafe-inline`.*
+
+**Phase 2 — design system + `/status/`.** The densest page, built first so the system is
+exercised properly rather than designed against the easiest case. Includes the redesign
+sign-off gate from §4. *Exit: reviewed on a real device in LINE via staging LIFF.*
+
+**Phase 3 — `/list/`.** Pagination, sorting, search. Removes the largest concentration of
+`innerHTML` in the codebase.
+
+**Phase 4 — `/ranking/`.** 24 month tabs, on-time timeline. React Query earns its place here.
+Fix the timezone bug (§8).
+
+**Phase 5 — `/verify/`.** Last, still. OTP, access requests, and the LIFF bind flow with its
+retry/fail-open/mismatch branches, ported as an explicit `email → code → request → bind`
+state machine. This is also where the `/verify` vs `/verify/` rewrite gets confirmed.
+*Exit: a real end-to-end bind on a device via staging LIFF, confirmed by a row in
+`line_verified_sessions`.*
+
+**Phase 6 — cutover.** See §9.
+
+**Phase 7 — decommission.** Delete `main.js`, `verify/`, `status/`, `list/`, `ranking/`,
+`assets/`, `src/constants.cjs`. Rewrite `eslint.config.mjs` (its browser-globals block and
+`supabase`/`liff`/`P4P` globals become meaningless). Retire the staging LIFF apps.
+
+---
+
+## 8. Bugs to fix during the rewrite
+
+Found while reading the current code. Each should land as its own commit inside the relevant
+phase, so it is visible in review rather than buried in a rewrite diff:
+
+- **`status/app.js:23`** — `par_sheetname` goes straight from the URL into `db.from()` with no
+  validation. Validate against `/^\d{4}_\d{2}$/` (this is the `zod` line item in §3).
 - **`ranking/app.js:34`** — `formatTime` renders `submitted_at` in the *device's* timezone.
-  Every consumer is in Thailand, but a device set to another zone silently shows wrong
-  submission times on a page whose entire purpose is ordering by time. Format in
-  `Asia/Bangkok` explicitly.
+  Every user is in Thailand, but a device set to another zone silently shows wrong times on a
+  page whose entire purpose is ordering by time. Format in `Asia/Bangkok` explicitly.
 - **`list/app.js:37`** — `toBE(year, month)` is called with two arguments; `toBE` takes one.
-  Harmless today, but it means the month-window code reads as if it does something it doesn't.
-- **`status/app.js:54`** — `arr` and `count_true` are module-level mutable state that is never
-  reset. Single-load pages today, so it never bites; in React it would be a bug immediately.
-- **`list/app.js`** — the clock `setInterval` is never cleared. Trivial now, a leak once
-  components mount and unmount.
+  Harmless today, but the month-window code reads as if it does something it doesn't.
+- **`status/app.js:54`** — `arr` and `count_true` are module-level mutable state, never reset.
+  Single-load pages today; a bug the moment components mount and unmount.
+- **`list/app.js:69`** — the clock `setInterval` is never cleared.
 
 ---
 
-## 7. Testing
+## 9. Cutover runbook
+
+Uses the maintenance window from decision 3. Target a date outside the 1st–15th submission
+window, when `/verify/` traffic is lowest.
+
+**Before:** all five phases merged and verified on staging; a rich-menu message announcing the
+window; `LINE_BIND_ENFORCE` left at its current value (do not combine a rollout switch with a
+cutover).
+
+1. Point the production Vercel project at the Next build; deploy without promoting.
+2. Verify on the preview alias one last time — all four pages, in LINE.
+3. Promote to production.
+4. Update the four **production** LIFF Endpoint URLs only if any path changed. It should not
+   have; if step 4 is a no-op, the migration is correct.
+5. Smoke test in this order: `/verify/` OTP → bind → redirect to `/status/`; then `/list/`,
+   `/ranking/`; then a real LINE bot `status` message; then a Telegram approve button.
+6. Watch Vercel logs for `[gate]`, `[line-bind]`, `[bind-loop]` and `[tg-webhook]` lines for
+   the first hour — the existing log prefixes are preserved specifically so this step works.
+7. Confirm fresh rows in `line_verified_sessions`.
+
+**Rollback:** promote the previous Vercel deployment. Because the paths and webhook
+registrations are unchanged, rollback is one click and needs no LINE-console edits. That
+property is worth protecting — it is the main reason §2 insists the paths stay identical.
+
+---
+
+## 10. Testing
 
 | Layer | Tool | What |
 |---|---|---|
-| Pure logic | Vitest | `lib/months.ts` (BE conversion, the 6- and 24-month windows, the `2569_04` floor, deadline computation), department sort order, filter/sort/pagination helpers. |
-| Components | Vitest + RTL | `OtpInput` (type, paste, backspace, arrows, bulk autofill), `StatusPage` view-mode transitions, `ListPage` pagination edges. |
-| Bind flow | Vitest + RTL | Mocked `fetch` for `/line/bind`: success, `403 mismatch`, generic failure under the limit, failure at the limit. These four branches currently have zero coverage and are the ones that lock people out. |
-| End to end | Playwright | The non-LIFF paths — desktop block, missing-token redirect to `/verify/`. Chromium is already available in CI. |
+| Gate | Vitest | Every branch of the middleware: no cookie, expired refresh, blocked, revoked, bind-required under/over the limit, loop-backstop tripped, gate RPC unreachable in both `LINE_BIND_ENFORCE` modes. Zero coverage today; the branches that lock people out. |
+| Webhooks | Vitest | LINE signature valid/invalid/missing; Telegram secret mismatch; `callback_query` parsing. |
+| Pure logic | Vitest | `months.ts` (BE conversion, 6- and 24-month windows, the `2569_04` floor, deadlines), department sort order, filter/sort/pagination. |
+| Components | Vitest + RTL | `OtpInput` (type, paste, backspace, arrows, bulk autofill), status view-mode transitions, list pagination edges. |
+| Bind flow | Vitest + RTL | Mocked `/line/bind`: success, `403 mismatch`, failure under the limit, failure at the limit. |
+| End to end | Playwright | Non-LIFF paths: desktop block, missing-token redirect to `/verify/`, CSP header shape. Chromium is already available in CI. |
+| Real device | Manual | Every phase, in LINE, via staging LIFF. Not optional — the webview is where this app's bugs live. |
 
-The existing `automation/test/*` suite (`node:test`) stays as it is; Vitest runs alongside it.
+The existing `automation/test/*` suite (`node:test`) is untouched and keeps running.
 
 ---
 
-## 8. Risks
+## 11. Risks
 
 | Risk | Mitigation |
 |---|---|
-| LIFF breaks on a rebuilt page (fragment handling, endpoint matching). | Phase 1 ships the smallest page first purely to find this early. Test on a real device inside LINE, not a desktop emulator. |
-| `@line/liff` npm package behaves differently from the CDN "edge" SDK. | Evaluate it in Phase 0. If it diverges, keep the CDN `<script>` and leave `static.line-scdn.net` in the CSP — the rewrite does not depend on this. |
-| `vercel-build` doesn't run under the legacy `builds` config. | Verify on a preview deploy before Phase 1 merges; fallback documented in §5. |
-| A visual regression slips through on Thai text. | Port CSS verbatim in Phases 1–4. Any redesign is a separate change, after the rewrite is complete. |
-| Users mid-verification during a deploy. | Phase 4 only. Deploy outside the 1st–15th submission window, when `/verify/` traffic is lowest. |
-
-## 9. Rough effort
-
-| Phase | Estimate |
-|---|---|
-| 0 — scaffold, lib, tests, deploy verification | 1–1.5 days |
-| 1 — ranking | 0.5 day |
-| 2 — list | 1 day |
-| 3 — status | 1–1.5 days |
-| 4 — verify | 1.5–2 days |
-| 5 — cleanup, CSP, lint config | 0.5 day |
-| **Total** | **~6–7 days**, shippable in six independent pieces |
+| The `/verify` vs `/verify/` redirect bug returns via Next's routing. | Middleware rewrite, not `trailingSlash`. Explicitly re-tested in Phase 5 on a real device. |
+| Next's inline scripts force `unsafe-inline` back into the CSP. | §6. Treated as a Phase 1 requirement, not cleanup. |
+| Middleware Edge runtime can't do something the gate needs. | Everything it needs is `fetch` + `atob`. If that proves wrong, the middleware can be pinned to the Node runtime. |
+| `@line/liff` npm diverges from the CDN "edge" SDK. | Checked in Phase 0. Fallback is the existing CDN tag, at the cost of one CSP origin. |
+| Redesign scope creeps and delays the migration. | One sign-off gate on one screen (§4), before three of the four pages are built. |
+| Cutover lands mid-submission-window. | Scheduled outside the 1st–15th; rollback is a single Vercel promotion (§9). |
+| Rewriting the gate reintroduces a lockout. | It is transcribed, not redesigned; comments carried across; every branch unit-tested; `LINE_BIND_ENFORCE` untouched during the cutover. |
 
 ---
 
-## 10. Open questions
+## 12. Effort
 
-1. **Next.js now or later?** This plan says later (§2). If the intent behind "ground-up
-   rewrite" was specifically to move onto Next.js, say so and Phase 6 moves to the front —
-   but the gate rewrite should still be its own phase, separate from the view layer.
-2. **Is a visual redesign in scope?** This plan assumes a pixel-faithful port. `design.md`
-   tokens are already applied consistently, so a redesign would be additive work with its own
-   review cycle.
-3. **Can `/verify/` be taken down for a short window?** A maintenance window during Phase 4
-   removes most of the deployment risk from the highest-risk phase.
+| Phase | Estimate |
+|---|---|
+| 0 — scaffold, Tailwind theme, lib, staging LIFF, CI | 2 days |
+| 1 — gate, middleware, CSP nonce, webhooks | 2–3 days |
+| 2 — design system + `/status/` (incl. sign-off) | 3 days |
+| 3 — `/list/` | 1.5 days |
+| 4 — `/ranking/` | 1 day |
+| 5 — `/verify/` | 2 days |
+| 6 — cutover + monitoring | 0.5 day |
+| 7 — decommission, lint config | 0.5 day |
+| **Total** | **~12–13 days** |
+
+Roughly double the Vite-only estimate in the first draft. The increase is the gate rewrite
+(~3 days) and the redesign (~3 days) — both deliberate, both consequences of decisions 1
+and 2 rather than scope creep.
