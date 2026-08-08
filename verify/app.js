@@ -306,14 +306,27 @@
         // ── Email input intro loading state ──────────────────────────────────
         // Briefly show loading dots over the email input (disabled underneath)
         // when the page first lands on step 1, then hand control to the user.
+        //
+        // Skipped entirely when recovering a draft: .input-loading-dots is an
+        // OPAQUE white overlay (position:absolute; inset:0; background:#fff) —
+        // showing it again after restoring their typed text just hides that
+        // text behind a solid white box for another 1.5s. Visually
+        // indistinguishable from "my typing got cleared", which is the exact
+        // bug this was meant to fix. A recovered draft means they're already
+        // mid-flow; there's nothing left to "settle".
         const draftEmail = readDraft()
         if (draftEmail) emailInput.value = draftEmail
         emailInput.addEventListener("input", () => saveDraft(emailInput.value.trim()))
-        emailInput.disabled = true
-        setTimeout(() => {
+        if (draftEmail) {
             emailInput.disabled = false
             emailLoadingDots.classList.add("hidden")
-        }, 1500)
+        } else {
+            emailInput.disabled = true
+            setTimeout(() => {
+                emailInput.disabled = false
+                emailLoadingDots.classList.add("hidden")
+            }, 1500)
+        }
 
         // ── Physician name (request-access step) ────────────────────────────────
         // This used to be a <select> populated from list_all_physicians(), which
