@@ -14,14 +14,32 @@
     const appEl         = document.getElementById("app")
     const logoutBtn     = document.getElementById("logout-btn")
     const tableSelect   = document.getElementById("table_select")
+    const searchInput   = document.getElementById("search_input")
+    const deptFilter    = document.getElementById("dept_filter")
     const addBtn        = document.getElementById("add-btn")
     const rowCount      = document.getElementById("row-count")
     const rowsEl        = document.getElementById("rows")
     const newRowCard    = document.getElementById("new-row-card")
     const statusMsg     = document.getElementById("status_msg")
+    const emptyState    = document.getElementById("empty-state")
 
-    let columns = []   // [{column_name, data_type, is_pk}]
+    let columns = []      // [{column_name, data_type, is_pk}]
     let currentTable = null
+    let allRows = []       // every row currently loaded for currentTable
+
+    // ── Canonical department list — mirrors status/app.js's dep_array so
+    // the admin dropdown and filter use the exact same Thai-dictionary
+    // order (INTERN forced last), instead of a second, possibly-drifting
+    // copy of that ordering. ──────────────────────────────────────────────
+    const dep_array = ["กุมารเวชกรรม", "จักษุวิทยา", "จิตเวชและยาเสพติด", "เทคนิคการแพทย์และพยาธิวิทยาคลินิก", "นิติเวช", "ผู้ป่วยนอก", "พยาธิวิทยากายวิภาค", "รังสีวิทยา", "วิสัญญีวิทยา", "เวชกรรมฟื้นฟู", "เวชกรรมสังคม", "เวชศาสตร์ฉุกเฉิน", "ศัลยกรรม", "ศัลยกรรมออร์โธปิดิกส์", "สูติ-นรีเวชกรรม", "โสต ศอ นาสิก", "อาชีวเวชกรรม", "อายุรกรรม", "INTERN"]
+    const sortDeps = (list) => [...list].sort((a, b) => {
+        const ia = dep_array.indexOf(a)
+        const ib = dep_array.indexOf(b)
+        if (ia === -1 && ib === -1) return a.localeCompare(b, "th")
+        if (ia === -1) return 1
+        if (ib === -1) return -1
+        return ia - ib
+    })
 
     // ── Helpers ──────────────────────────────────────────────────────────
     function escHtml(s) {
@@ -73,6 +91,24 @@
         return columns.filter((c) => !c.is_pk)
     }
 
+    // Thai prefixes attach directly to the first name (no space), e.g.
+    // "นพ.สมชาย ใจดี" — matches the convention used elsewhere in this
+    // codebase (see verify/app.js's full-name trim(coalesce(...))).
+    function fullName(row) {
+        const head = ((row.prefix || "") + (row.firstname || "")).trim()
+        return (head + " " + (row.lastname || "")).trim().replace(/\s+/g, " ")
+    }
+
+    // Sort key WITHOUT the prefix — sorting on fullName() would group
+    // everyone by นพ./พญ. first (a Thai collator has no way to know
+    // "นพ."/"พญ." is a title rather than part of the name), scattering an
+    // otherwise-alphabetical roster into two title-shaped halves. Dropping
+    // the prefix here sorts strictly by given name, matching what "sort by
+    // name" actually means to someone scanning the list for a person.
+    function sortName(row) {
+        return ((row.firstname || "") + " " + (row.lastname || "")).trim().replace(/\s+/g, " ")
+    }
+
     function inputTypeFor(col) {
         if (isTimestampType(col.data_type)) return "datetime-local"
         if (isNumericType(col.data_type)) return "number"
@@ -104,7 +140,21 @@
         return tableSelect.value
     }
 
-    // ── Rows rendering ───────────────────────────────────────────────────
+    // ── Department filter dropdown ──────────────────────────────────────
+    function populateDeptFilter() {
+        const present = sortDeps([...new Set(allRows.map((r) => r.department).filter(Boolean))])
+        const current = deptFilter.value
+        deptFilter.innerHTML = '<option value="">ทุกกลุ่มงาน</option>'
+        for (const d of present) {
+            const opt = document.createElement("option")
+            opt.value = d
+            opt.textContent = d === "INTERN" ? "INTERN" : "กลุ่มงาน" + d
+            deptFilter.appendChild(opt)
+        }
+        if (present.includes(current)) deptFilter.value = current
+    }
+
+    // ── Field rendering ──────────────────────────────────────────────────
     function fieldLineHtml(col, value, editing) {
         const label = escHtml(col.column_name)
         if (!editing) {
@@ -116,6 +166,20 @@
             return '<div class="field-line"><div class="field-label">' + label + '</div>' +
                 '<div class="field-value">' + (display == null || display === "" ? "<span style=\"color:var(--border)\">—</span>" : escHtml(display)) + "</div></div>"
         }
+        // Department switches from free text to a dropdown so the admin can
+        // only assign a valid, canonically-spelled department. If the
+        // current value isn't in the canonical list (a legacy/typo'd
+        // value), keep it as the first option so saving without touching
+        // this field doesn't silently overwrite it.
+        if (col.column_name === "department") {
+            const options = value && !dep_array.includes(value) ? [value, ...dep_array] : dep_array
+            const opts = options.map((d) =>
+                '<option value="' + escHtml(d) + '"' + (d === value ? " selected" : "") + '>' +
+                escHtml(d === "INTERN" ? "INTERN" : d) + "</option>"
+            ).join("")
+            return '<div class="field-line"><div class="field-label">' + label + '</div>' +
+                '<select data-col="department"><option value="">—</option>' + opts + "</select></div>"
+        }
         const type = inputTypeFor(col)
         const inputValue = type === "datetime-local" ? toLocalInputValue(value) : (value == null ? "" : value)
         return '<div class="field-line"><div class="field-label">' + label + '</div>' +
@@ -126,7 +190,7 @@
 
     function collectInputValues(card) {
         const out = {}
-        card.querySelectorAll("input[data-col]").forEach((input) => {
+        card.querySelectorAll("[data-col]").forEach((input) => {
             const col = columns.find((c) => c.column_name === input.dataset.col)
             let v = input.value
             if (v === "") { out[input.dataset.col] = null; return }
@@ -137,27 +201,43 @@
         return out
     }
 
+    // ── Row cards ────────────────────────────────────────────────────────
+    // Cards default to collapsed (name + department badge only) — a full
+    // ~200-row roster is unwieldy with every field always visible. Tapping
+    // the header expands to a read-only field list with edit/delete
+    // actions; edit mode is only reachable from there.
     function renderRowCard(row) {
         const card = document.createElement("div")
         card.className = "row-card"
         const pk = columns.find((c) => c.is_pk)
         const pkValue = pk ? row[pk.column_name] : null
 
+        const head = document.createElement("div")
+        head.className = "row-card-head"
+        head.innerHTML =
+            '<div class="row-card-name">' + escHtml(fullName(row) || "(ไม่มีชื่อ)") + "</div>" +
+            (row.department ? '<div class="dept-badge">' + escHtml(row.department) + "</div>" : "") +
+            '<svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>'
+        head.addEventListener("click", () => card.classList.toggle("expanded"))
+
+        const body = document.createElement("div")
+        body.className = "row-card-body"
+
         function renderView() {
             card.classList.remove("editing")
-            card.innerHTML = editableColumns().map((c) => fieldLineHtml(c, row[c.column_name], false)).join("") +
+            body.innerHTML = editableColumns().map((c) => fieldLineHtml(c, row[c.column_name], false)).join("") +
                 '<div class="row-actions">' +
                 '<button type="button" class="row-btn btn-delete">ลบ</button>' +
                 '<button type="button" class="row-btn btn-edit">แก้ไข</button>' +
                 "</div>"
-            card.querySelector(".btn-edit").addEventListener("click", renderEdit)
-            card.querySelector(".btn-delete").addEventListener("click", async () => {
-                if (!confirm("ยืนยันการลบแถวนี้?")) return
+            body.querySelector(".btn-edit").addEventListener("click", renderEdit)
+            body.querySelector(".btn-delete").addEventListener("click", async () => {
+                if (!confirm("ยืนยันการลบ " + fullName(row) + "?")) return
                 try {
                     await api("/admin/api/tables/" + encodeURIComponent(currentTable) + "/rows/" + encodeURIComponent(pkValue), { method: "DELETE" })
-                    card.remove()
+                    allRows = allRows.filter((r) => r !== row)
+                    renderList()
                     showStatus("ลบแล้ว", false)
-                    updateRowCount(-1)
                 } catch (e) {
                     showStatus("ลบไม่สำเร็จ: " + e.message, true)
                 }
@@ -166,20 +246,29 @@
 
         function renderEdit() {
             card.classList.add("editing")
-            card.innerHTML = editableColumns().map((c) => fieldLineHtml(c, row[c.column_name], true)).join("") +
+            body.innerHTML = editableColumns().map((c) => fieldLineHtml(c, row[c.column_name], true)).join("") +
                 '<div class="row-actions">' +
                 '<button type="button" class="row-btn btn-cancel">ยกเลิก</button>' +
                 '<button type="button" class="row-btn btn-save">บันทึก</button>' +
                 "</div>"
-            card.querySelector(".btn-cancel").addEventListener("click", renderView)
-            card.querySelector(".btn-save").addEventListener("click", async () => {
-                const body = collectInputValues(card)
+            body.querySelector(".btn-cancel").addEventListener("click", renderView)
+            body.querySelector(".btn-save").addEventListener("click", async () => {
+                const body_ = collectInputValues(body)
                 try {
                     const { row: updated } = await api(
                         "/admin/api/tables/" + encodeURIComponent(currentTable) + "/rows/" + encodeURIComponent(pkValue),
-                        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
+                        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body_) }
                     )
-                    Object.assign(row, updated || body)
+                    Object.assign(row, updated || body_)
+                    head.querySelector(".row-card-name").textContent = fullName(row) || "(ไม่มีชื่อ)"
+                    const badge = head.querySelector(".dept-badge")
+                    if (row.department) {
+                        if (badge) badge.textContent = row.department
+                        else head.insertBefore(Object.assign(document.createElement("div"), { className: "dept-badge", textContent: row.department }), head.querySelector(".chevron"))
+                    } else if (badge) {
+                        badge.remove()
+                    }
+                    populateDeptFilter()
                     renderView()
                     showStatus("บันทึกแล้ว", false)
                 } catch (e) {
@@ -189,12 +278,36 @@
         }
 
         renderView()
+        card.appendChild(head)
+        card.appendChild(body)
         return card
     }
 
-    function updateRowCount(delta) {
-        const n = rowsEl.children.length + (delta || 0)
-        rowCount.textContent = n + " แถว"
+    // ── Filter + sort + render pipeline ─────────────────────────────────
+    // Single source of truth: allRows. Every mutation (insert/update/
+    // delete) updates allRows then calls this — search, department filter
+    // and Thai-collated name sort all recompute from scratch each time, so
+    // the list is always self-consistent without a network refetch.
+    function renderList() {
+        const q = searchInput.value.trim().toLowerCase()
+        const dept = deptFilter.value
+
+        let visible = allRows.filter((row) => {
+            if (dept && row.department !== dept) return false
+            if (!q) return true
+            const haystack = (fullName(row) + " " + (row.department || "")).toLowerCase()
+            return haystack.includes(q)
+        })
+
+        // Thai-dictionary-correct sort (same technique as status/app.js's
+        // localeCompare(..., "th") — raw codepoint order gets Thai vowel/
+        // tone-mark placement wrong).
+        visible.sort((a, b) => sortName(a).localeCompare(sortName(b), "th"))
+
+        rowsEl.innerHTML = ""
+        for (const row of visible) rowsEl.appendChild(renderRowCard(row))
+        rowCount.textContent = visible.length + " จาก " + allRows.length + " แถว"
+        emptyState.classList.toggle("hidden", visible.length > 0)
     }
 
     async function loadRowsAndColumns(table) {
@@ -207,8 +320,10 @@
                 api("/admin/api/tables/" + encodeURIComponent(table) + "/rows"),
             ])
             columns = cols
-            for (const row of rows) rowsEl.appendChild(renderRowCard(row))
-            rowCount.textContent = rows.length + " แถว"
+            allRows = rows
+            searchInput.value = ""
+            populateDeptFilter()
+            renderList()
         } catch (e) {
             if (e.message !== "unauthorized") showStatus("โหลดข้อมูลไม่สำเร็จ: " + e.message, true)
         } finally {
@@ -235,11 +350,14 @@
                     "/admin/api/tables/" + encodeURIComponent(currentTable) + "/rows",
                     { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
                 )
-                if (row) rowsEl.insertBefore(renderRowCard(row), rowsEl.firstChild)
+                if (row) {
+                    allRows.push(row)
+                    populateDeptFilter()
+                    renderList()
+                }
                 newRowCard.style.display = "none"
                 newRowCard.innerHTML = ""
                 showStatus("เพิ่มแถวแล้ว", false)
-                updateRowCount(1)
             } catch (e) {
                 showStatus("เพิ่มแถวไม่สำเร็จ: " + e.message, true)
             }
@@ -251,6 +369,8 @@
         currentTable = tableSelect.value
         loadRowsAndColumns(currentTable)
     })
+    searchInput.addEventListener("input", renderList)
+    deptFilter.addEventListener("change", renderList)
 
     logoutBtn.addEventListener("click", async () => {
         await fetch("/admin/logout", { method: "POST", credentials: "same-origin" }).catch(() => {})
