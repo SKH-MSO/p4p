@@ -46,7 +46,7 @@ const LINE_BIND_ENFORCE = process.env.LINE_BIND_ENFORCE === "true"
 const ADMIN_LINE_USER_ID = process.env.ADMIN_LINE_USER_ID || "Ub5c3e37b54e59f479fbf450e2df60d18"
 // Base URL used to build the one-time admin login link sent over LINE DM
 // (the webhook has no `req` to read a Host header from).
-const ADMIN_BASE_URL = process.env.ADMIN_BASE_URL || "https://skh-mso-p4p.vercel.app"
+const ADMIN_BASE_URL = process.env.ADMIN_BASE_URL || "https://p4p-sakhonmso.vercel.app"
 
 const headers = {
   "Content-Type": "application/json",
