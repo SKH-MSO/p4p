@@ -104,6 +104,37 @@ function setSessionCookie(res, at, rt) {
 function clearSessionCookie(res) {
   res.append("Set-Cookie", RT_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
 }
+
+// ── Bind-redirect loop breaker ───────────────────────────────────────────
+// Incident (2026-08): an unbound physician got stuck reloading between a
+// gated page and /verify/ with no way out. Root cause: the "bind_required"
+// redirect below is gated on the DATABASE's line_bind_attempts count, but
+// verify/app.js's recordBindFailure() silently swallows any failure to reach
+// that RPC and fabricates attempts=3 locally so the CLIENT auto-redirects
+// back here — while the server, reading the real (unincremented) DB count,
+// sees attempts stuck below the limit and immediately redirects right back
+// to /verify/, which auto-runs the bind flow again on load with no tap
+// required. Client and server disagreed on the count, and nothing caught it.
+//
+// This cookie is a hard backstop that does not depend on Supabase, LINE, or
+// any client JS being reachable or correct — pure Express state. It counts
+// consecutive bind_required redirects for THIS browser and, once BIND_LOOP_MAX
+// is hit, serves the page instead of redirecting again, regardless of what
+// the DB says. A short Max-Age means a stuck user recovers within minutes
+// even if they never revisit; a successful serve always clears it, so a
+// later, genuine bind prompt is never permanently suppressed for that browser.
+const BIND_LOOP_COOKIE = "p4p_bindloop"
+const BIND_LOOP_MAX = 4 // one above the intended 3 real attempts, as slack
+function bindLoopCount(req) {
+  const n = parseInt(parseCookies(req)[BIND_LOOP_COOKIE], 10)
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+function bumpBindLoopCookie(res, n) {
+  res.append("Set-Cookie", BIND_LOOP_COOKIE + "=" + n + "; " + COOKIE_BASE + "; Max-Age=900")
+}
+function clearBindLoopCookie(res) {
+  res.append("Set-Cookie", BIND_LOOP_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
+}
 function readSessionCookie(req) {
   const raw = parseCookies(req)[RT_COOKIE]
   if (!raw) return null
@@ -289,21 +320,26 @@ function servePage(name) {
       // LIFF app turned out to be missing the `openid` scope — ~200 people
       // locked out of a hospital tool by one env var. Users who have never
       // proved keep the old rules until they do, so the factor phases in.
-      if (LINE_BIND_ENFORCE && gate.enforce_eligible) {
-        // The SESSION must have proved it. Checking `is_bound` instead would
-        // gate nothing: an attacker holding a stolen email inherits the
-        // victim's earlier bind and walks straight in, even though their own
-        // bind was refused as a mismatch. No attempts-based fail-open here
-        // either — a second factor you can opt out of by failing three times
-        // is not a second factor.
-        if (!gate.session_verified) {
+      const wantsBindRedirect = LINE_BIND_ENFORCE && gate.enforce_eligible
+        ? !gate.session_verified
+        : !gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT
+
+      if (wantsBindRedirect) {
+        // Hard backstop, independent of the DB-backed attempts count above
+        // (see the comment on BIND_LOOP_COOKIE) — this redirect must never be
+        // able to fire more than BIND_LOOP_MAX times in a row for one browser,
+        // full stop, regardless of whether Supabase, LINE, or the client's own
+        // retry accounting are behaving correctly.
+        const loopCount = bindLoopCount(req)
+        if (loopCount < BIND_LOOP_MAX) {
+          bumpBindLoopCookie(res, loopCount + 1)
           return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
         }
-      } else if (!gate.is_bound && gate.attempts < BIND_ATTEMPT_LIMIT) {
-        return res.redirect(302, "/verify/?return=" + ret + "&reason=bind_required#")
+        console.warn("[bind-loop] backstop tripped for " + name + " — serving unbound rather than redirecting again")
       }
     }
 
+    clearBindLoopCookie(res)
     res.setHeader("Content-Type", "text/html; charset=utf-8")
     res.send(pageTemplates[name].replace(PAGE_TOKEN_PLACEHOLDER, at))
   }
