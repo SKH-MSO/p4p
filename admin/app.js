@@ -183,7 +183,11 @@
                 '<select data-col="department"><option value="">—</option>' + opts + "</select></div>"
         }
         const type = inputTypeFor(col)
-        const inputValue = type === "datetime-local" ? toLocalInputValue(value) : (value == null ? "" : value)
+        let inputValue = type === "datetime-local" ? toLocalInputValue(value) : (value == null ? "" : value)
+        // Almost every row is "นายแพทย์" — autofill it when the field is
+        // blank so the admin isn't retyping the same value on every add/
+        // edit; still just a normal editable value, not a fixed default.
+        if (col.column_name === "position" && !inputValue) inputValue = "นายแพทย์"
         return '<div class="field-line"><div class="field-label">' + label + '</div>' +
             '<input data-col="' + escHtml(col.column_name) + '" type="' + type + '" ' +
             (type === "number" ? 'step="any" ' : "") +
