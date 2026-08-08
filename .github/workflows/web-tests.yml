@@ -1,0 +1,51 @@
+name: web tests
+
+# The Next.js rewrite (see REACT_REWRITE_PLAN.md). Nothing here is deployed
+# yet; this workflow keeps the rewrite honest while it is built alongside the
+# live Express app.
+on:
+  push:
+    paths:
+      - "web/**"
+      # The parity guard in web/lib/__tests__/parity.test.ts asserts these two
+      # legacy sources still agree with web/lib. Editing either one must run
+      # this workflow, or the copies can silently drift apart.
+      - "src/constants.cjs"
+      - "assets/shared.js"
+      - ".github/workflows/web-tests.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "src/constants.cjs"
+      - "assets/shared.js"
+      - ".github/workflows/web-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
+      - run: npm run typecheck
+
+      # Catches the failure mode that unit tests cannot: a page that compiles
+      # but does not build (a server/client boundary mistake, or a browser-only
+      # import pulled into a server component).
+      - run: npm run build

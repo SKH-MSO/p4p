@@ -3,7 +3,11 @@ import globals from "globals"
 import prettier from "eslint-config-prettier"
 
 export default [
-  { ignores: ["node_modules/**", "assets/cards/**", ".vercel/**"] },
+  // web/ is the Next.js rewrite (REACT_REWRITE_PLAN.md). It is a self-contained
+  // sub-project with its own TypeScript toolchain and its own lint step, and
+  // its build output under web/.next/ is minified bundles. This config has no
+  // TS parser and would report thousands of false positives on both.
+  { ignores: ["node_modules/**", "assets/cards/**", ".vercel/**", "web/**"] },
 
   js.configs.recommended,
 
