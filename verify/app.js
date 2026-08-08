@@ -325,7 +325,7 @@
             setTimeout(() => {
                 emailInput.disabled = false
                 emailLoadingDots.classList.add("hidden")
-            }, 1500)
+            }, 6000)
         }
 
         // ── Physician name (request-access step) ────────────────────────────────
