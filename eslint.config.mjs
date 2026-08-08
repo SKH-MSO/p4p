@@ -40,6 +40,7 @@ export default [
       "status/**/*.js",
       "list/**/*.js",
       "ranking/**/*.js",
+      "admin/**/*.js",
     ],
     languageOptions: {
       sourceType: "script",

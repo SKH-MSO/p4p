@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SAKHONMSO P4P — Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --primary: #A68966;
+            --secondary: #4B3D33;
+            --tertiary: #F5F5F0;
+            --neutral: #FAF9F6;
+            --text: #2d2d2d;
+            --text-muted: #6b6b6b;
+            --muted: #9A8A7A;
+            --border: #d9d2c8;
+            --danger: #c0392b;
+            --ok: #2e7d32;
+            --radius: 4px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            background: var(--neutral);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Desktop block ───────────────────────────────────── */
+        #desktop-block {
+            display: none;
+            position: fixed; inset: 0;
+            background: var(--neutral);
+            flex-direction: column;
+            align-items: center; justify-content: center;
+            text-align: center; padding: 32px; z-index: 999;
+        }
+        #desktop-block h2 {
+            font-family: 'Manrope', 'Noto Sans Thai Looped', sans-serif;
+            font-size: 1.35rem; font-weight: 700; color: var(--secondary); margin-bottom: 8px;
+        }
+        #desktop-block p { color: var(--muted); font-size: .95rem; }
+
+        /* Header */
+        #header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--primary);
+            color: #fff;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            box-shadow: 0 2px 8px rgba(75, 61, 51, 0.1);
+        }
+        #header h1 { font-size: 1.05rem; font-weight: 700; }
+        #logout-btn {
+            background: none; border: 1px solid rgba(255,255,255,.5); color: #fff;
+            border-radius: var(--radius); padding: 6px 10px; font-size: .8rem; cursor: pointer;
+        }
+
+        /* Spinner */
+        #load {
+            width: 36px; height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 40px auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .hidden { display: none !important; }
+
+        /* Unauthorized */
+        #unauthorized {
+            padding: 40px 24px;
+            text-align: center;
+        }
+        #unauthorized h2 {
+            font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
+            font-size: 1.1rem; color: var(--secondary); margin-bottom: 10px;
+        }
+        #unauthorized p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
+        #unauthorized code {
+            display: inline-block; margin-top: 4px; padding: 3px 8px;
+            background: var(--tertiary); border-radius: var(--radius); color: var(--secondary);
+        }
+
+        /* Content */
+        #content { padding: 12px 12px 60px; }
+
+        #controls {
+            display: flex; gap: 8px; margin-bottom: 12px;
+        }
+        #table_select {
+            flex: 1;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 10px;
+            background: var(--neutral);
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+        #add-btn, .row-btn {
+            border: none; border-radius: var(--radius);
+            padding: 8px 12px; font-size: 0.85rem; cursor: pointer;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+        }
+        #add-btn { background: var(--primary); color: #fff; white-space: nowrap; }
+
+        #row-count { font-size: .8rem; color: var(--text-muted); margin-bottom: 8px; }
+
+        /* Row cards (mobile-friendly instead of a wide table) */
+        .row-card {
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            background: #fff;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .row-card.editing { border-color: var(--primary); }
+        .field-line {
+            display: flex; align-items: center; gap: 8px;
+            padding: 4px 0;
+        }
+        .field-label {
+            width: 84px; flex-shrink: 0;
+            font-size: .75rem; color: var(--text-muted);
+        }
+        .field-value { font-size: .92rem; word-break: break-word; }
+        .field-line input {
+            flex: 1; min-width: 0;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius);
+            padding: 6px 8px;
+            font-size: 0.88rem;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+        }
+        .row-actions {
+            display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end;
+        }
+        .btn-edit { background: var(--tertiary); color: var(--secondary); }
+        .btn-save { background: var(--ok); color: #fff; }
+        .btn-cancel { background: var(--tertiary); color: var(--text-muted); }
+        .btn-delete { background: var(--danger); color: #fff; }
+
+        #new-row-card { display: none; }
+
+        #status_msg {
+            font-size: .82rem; text-align: center; padding: 8px; border-radius: var(--radius);
+            margin-bottom: 10px;
+        }
+        #status_msg.ok { background: #e6f4ea; color: var(--ok); }
+        #status_msg.error { background: #fdecea; color: var(--danger); }
+        #status_msg.hidden { display: none; }
+    </style>
+</head>
+
+<body>
+    <div id="desktop-block">
+        <h2>ไม่รองรับการใช้งานบนคอมพิวเตอร์</h2>
+        <p>กรุณาเปิดลิงก์นี้ผ่านโทรศัพท์มือถือ</p>
+    </div>
+
+    <div id="load"></div>
+
+    <div id="unauthorized" class="hidden">
+        <h2>เข้าถึงไม่ได้</h2>
+        <p>
+            หน้านี้สำหรับผู้ดูแลระบบเท่านั้น<br>
+            กรุณาส่งข้อความ <code>admin</code> ให้บอท LINE ของระบบ<br>
+            เพื่อรับลิงก์เข้าสู่ระบบ
+        </p>
+    </div>
+
+    <div id="app" class="hidden">
+        <div id="header">
+            <h1>Roster Admin</h1>
+            <button id="logout-btn" type="button">ออกจากระบบ</button>
+        </div>
+        <div id="content">
+            <div id="status_msg" class="hidden"></div>
+            <div id="controls">
+                <select id="table_select"></select>
+                <button id="add-btn" type="button">+ เพิ่มแถว</button>
+            </div>
+            <div id="row-count"></div>
+            <div id="new-row-card" class="row-card editing"></div>
+            <div id="rows"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

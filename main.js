@@ -1,5 +1,6 @@
 const express = require("express")
 const process = require("node:process")
+const crypto = require("node:crypto")
 const line = require("@line/bot-sdk")
 const axios = require("axios")
 const app = express()
@@ -36,6 +37,16 @@ const LINE_LOGIN_CHANNEL_ID = process.env.LINE_LOGIN_CHANNEL_ID
 // liff.getIDToken() returns null without it and every bind fails. Check with:
 //   select count(*) from public.line_verified_sessions where verified_at > now() - interval '1 day';
 const LINE_BIND_ENFORCE = process.env.LINE_BIND_ENFORCE === "true"
+
+// The single LINE userId allowed into /admin/ (the roster CRUD dashboard,
+// see servePage-adjacent routes below). Not a secret in itself — a LINE
+// userId only identifies an account, it can't be used to authenticate as
+// one — so a hardcoded fallback is fine; ADMIN_LINE_USER_ID lets it be
+// overridden per-deployment without a code change.
+const ADMIN_LINE_USER_ID = process.env.ADMIN_LINE_USER_ID || "Ub5c3e37b54e59f479fbf450e2df60d18"
+// Base URL used to build the one-time admin login link sent over LINE DM
+// (the webhook has no `req` to read a Host header from).
+const ADMIN_BASE_URL = process.env.ADMIN_BASE_URL || "https://skh-mso-p4p.vercel.app"
 
 const headers = {
   "Content-Type": "application/json",
@@ -159,6 +170,96 @@ function jwtPayload(token) {
   } catch (e) { return {} }
 }
 function jwtExp(token) { return typeof jwtPayload(token).exp === "number" ? jwtPayload(token).exp : 0 }
+
+// ── Admin auth (/admin/) — separate from the physician email/OTP/LIFF flow ──
+// The admin dashboard has exactly one legitimate user, already identified by
+// LINE userId (see ADMIN_LINE_USER_ID). Rather than standing up a dedicated
+// LIFF app (each one is registered in the LINE Developers console against a
+// fixed Endpoint URL — not something reachable from here), this reuses the
+// Messaging API bot already wired up below: LINE's webhook signature
+// (line.middleware) authenticates event.source.userId, so a plain DM is
+// enough proof of identity. Sending "admin" from that exact userId gets a
+// short-lived signed login link back; visiting it sets a signed session
+// cookie. No Supabase auth user, no LIFF, no OTP involved.
+//
+// Tokens are stateless HMAC-signed strings (no server-side storage — this
+// runs on Vercel, where nothing survives between invocations reliably). The
+// signing key reuses two secrets this deployment already has rather than
+// requiring a new one to be provisioned; "purpose" is mixed into the HMAC so
+// a short-lived login token can never be replayed as a long-lived session
+// cookie or vice versa.
+const ADMIN_TOKEN_KEY = LINE_CHANNEL_SECRET + ":" + SUPABASE_SERVICE_ROLE_KEY
+function signAdminToken(purpose, exp) {
+  const sig = crypto.createHmac("sha256", ADMIN_TOKEN_KEY).update(purpose + ":" + exp).digest("hex")
+  return exp + "." + sig
+}
+function verifyAdminToken(purpose, token) {
+  if (!token || typeof token !== "string") return false
+  const i = token.indexOf(".")
+  if (i === -1) return false
+  const exp = parseInt(token.slice(0, i), 10)
+  const sig = token.slice(i + 1)
+  if (!Number.isFinite(exp) || exp < Date.now() / 1000) return false
+  const expected = crypto.createHmac("sha256", ADMIN_TOKEN_KEY).update(purpose + ":" + exp).digest("hex")
+  // Constant-time compare — this gates write access to every roster table.
+  const a = Buffer.from(sig)
+  const b = Buffer.from(expected)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+const ADMIN_COOKIE = "p4p_admin"
+function setAdminCookie(res) {
+  const exp = Math.floor(Date.now() / 1000) + 90 * 24 * 3600 // 90 days
+  res.append("Set-Cookie", ADMIN_COOKIE + "=" + signAdminToken("session", exp) + "; " + COOKIE_BASE + "; Max-Age=" + 90 * 24 * 3600)
+}
+function clearAdminCookie(res) {
+  res.append("Set-Cookie", ADMIN_COOKIE + "=; " + COOKIE_BASE + "; Max-Age=0")
+}
+function requireAdmin(req, res, next) {
+  const token = parseCookies(req)[ADMIN_COOKIE]
+  if (!verifyAdminToken("session", token)) return res.status(401).json({ error: "not authenticated" })
+  next()
+}
+
+// Calls a service_role-only RPC (admin_list_roster_tables / admin_table_columns)
+// — same "apikey + Authorization both = service role key" pattern already
+// used for approve_access_request/reject_access_request below.
+async function callServiceRpc(fn, args) {
+  const r = await axios.post(
+    SUPABASE_URL + "/rest/v1/rpc/" + fn,
+    args || {},
+    {
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+        "Content-Type": "application/json",
+      },
+      timeout: 8000,
+    }
+  )
+  return r.data
+}
+
+// PostgREST error bodies are {message, details, hint, code} — surfaced back
+// to the browser as-is. This is a single-admin internal tool, not a public
+// API, so a raw constraint-violation message (e.g. "null value in column
+// "prefix" violates not-null constraint") is more useful to the admin than a
+// generic "insert failed", and there's no other caller to leak it to.
+function pgErrorMessage(e, fallback) {
+  return (e.response && e.response.data && e.response.data.message) || fallback
+}
+
+// Re-fetches the live roster-table list and checks membership — never trust
+// a :table path param on its own, since it selects which Postgres table the
+// next request reads/writes.
+async function assertRosterTable(table) {
+  const tables = await callServiceRpc("admin_list_roster_tables")
+  if (!Array.isArray(tables) || !tables.includes(table)) {
+    const err = new Error("unknown roster table: " + table)
+    err.status = 404
+    throw err
+  }
+}
 
 // Resolve a usable access token from the session cookie: reuse the cached one
 // while it's fresh, otherwise refresh once (rotating the cookie). Returns
@@ -639,10 +740,147 @@ app.get(["/verify", "/verify/"], async (req, res) => {
   res.send(at ? verifyTemplate.replace(PAGE_TOKEN_PLACEHOLDER, at) : verifyTemplate)
 })
 
+// ── /admin/ — roster CRUD dashboard, single-admin only ──────────────────────
+// See the "Admin auth" block above for how ADMIN_COOKIE gets set (LINE DM ->
+// signed login link -> this cookie). The page itself is served as a plain
+// static file (no server-side gating on the HTML — it renders an
+// "unauthorized" state client-side by calling GET /admin/api/tables, which
+// IS gated) so it needs no <meta> token injection and no CSP changes: it
+// never talks to Supabase directly, only to these same-origin routes, which
+// hold SUPABASE_SERVICE_ROLE_KEY server-side.
+
+// One-time login link from the LINE bot. Invalid/expired -> bounce to the
+// page itself, which shows the "message the bot" instructions.
+app.get("/admin/login", (req, res) => {
+  const token = String(req.query.token || "")
+  if (!verifyAdminToken("login", token)) return res.redirect(302, "/admin/?error=bad_token")
+  setAdminCookie(res)
+  res.redirect(302, "/admin/")
+})
+
+app.post("/admin/logout", (req, res) => { clearAdminCookie(res); res.json({ ok: true }) })
+
+app.get("/admin/api/tables", requireAdmin, async (req, res) => {
+  try {
+    const tables = await callServiceRpc("admin_list_roster_tables")
+    res.json({ tables: tables || [] })
+  } catch (e) {
+    console.error("[admin] list tables failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(500).json({ error: "failed to list tables" })
+  }
+})
+
+app.get("/admin/api/tables/:table/columns", requireAdmin, async (req, res) => {
+  try {
+    await assertRosterTable(req.params.table)
+    const columns = await callServiceRpc("admin_table_columns", { p_table: req.params.table })
+    res.json({ columns: columns || [] })
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ error: "unknown table" })
+    console.error("[admin] columns failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(500).json({ error: "failed to load columns" })
+  }
+})
+
+app.get("/admin/api/tables/:table/rows", requireAdmin, async (req, res) => {
+  try {
+    await assertRosterTable(req.params.table)
+    const r = await axios.get(
+      SUPABASE_URL + "/rest/v1/" + encodeURIComponent(req.params.table) + "?select=*&order=department,lastname",
+      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY }, timeout: 8000 }
+    )
+    res.json({ rows: r.data })
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ error: "unknown table" })
+    console.error("[admin] rows fetch failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(500).json({ error: "failed to load rows" })
+  }
+})
+
+// Keeps only keys that are real, non-PK columns of the target table — the
+// request body is client-controlled, so this is what stops an insert/update
+// from writing to a column that doesn't exist (PostgREST would 400 anyway)
+// or overwriting the `index` primary key.
+async function filterToColumns(table, body) {
+  const columns = await callServiceRpc("admin_table_columns", { p_table: table })
+  const allowed = new Set((columns || []).filter((c) => !c.is_pk).map((c) => c.column_name))
+  const out = {}
+  for (const k of Object.keys(body || {})) {
+    if (allowed.has(k)) out[k] = body[k]
+  }
+  return out
+}
+
+app.post("/admin/api/tables/:table/rows", requireAdmin, express.json({ limit: "32kb" }), async (req, res) => {
+  try {
+    await assertRosterTable(req.params.table)
+    const body = await filterToColumns(req.params.table, req.body)
+    const r = await axios.post(
+      SUPABASE_URL + "/rest/v1/" + encodeURIComponent(req.params.table),
+      body,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        timeout: 8000,
+      }
+    )
+    res.json({ row: (r.data && r.data[0]) || null })
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ error: "unknown table" })
+    console.error("[admin] insert failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(400).json({ error: pgErrorMessage(e, "insert failed") })
+  }
+})
+
+app.patch("/admin/api/tables/:table/rows/:index", requireAdmin, express.json({ limit: "32kb" }), async (req, res) => {
+  try {
+    await assertRosterTable(req.params.table)
+    const body = await filterToColumns(req.params.table, req.body)
+    const r = await axios.patch(
+      SUPABASE_URL + "/rest/v1/" + encodeURIComponent(req.params.table) + "?index=eq." + encodeURIComponent(req.params.index),
+      body,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY,
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+        },
+        timeout: 8000,
+      }
+    )
+    res.json({ row: (r.data && r.data[0]) || null })
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ error: "unknown table" })
+    console.error("[admin] update failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(400).json({ error: pgErrorMessage(e, "update failed") })
+  }
+})
+
+app.delete("/admin/api/tables/:table/rows/:index", requireAdmin, async (req, res) => {
+  try {
+    await assertRosterTable(req.params.table)
+    await axios.delete(
+      SUPABASE_URL + "/rest/v1/" + encodeURIComponent(req.params.table) + "?index=eq." + encodeURIComponent(req.params.index),
+      { headers: { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: "Bearer " + SUPABASE_SERVICE_ROLE_KEY }, timeout: 8000 }
+    )
+    res.json({ ok: true })
+  } catch (e) {
+    if (e.status === 404) return res.status(404).json({ error: "unknown table" })
+    console.error("[admin] delete failed:", e.response ? JSON.stringify(e.response.data) : e.message)
+    res.status(500).json({ error: "delete failed" })
+  }
+})
+
 app.use("/status", express.static("status"))
 app.use("/list", express.static("list"))
 app.use("/ranking", express.static("ranking"))
 app.use("/verify", express.static("verify"))
+app.use("/admin", express.static("admin"))
 app.use("/assets", express.static("assets"))
 
 app.post("/line", line.middleware(config), (req, res) => {
@@ -678,6 +916,18 @@ const handleEvent = async (event) => {
     return client.replyMessage({
       "replyToken": event.replyToken,
       "messages": [{ "type": "text", "text": event.source.userId }]
+    })
+  }
+  if (message === "admin") {
+    // Silent no-op for anyone else — never confirm or deny that "admin" is a
+    // recognized command, so this can't be used to probe for the admin's
+    // userId.
+    if (event.source.userId !== ADMIN_LINE_USER_ID) return Promise.resolve(null)
+    const exp = Math.floor(Date.now() / 1000) + 600 // 10 minutes
+    const url = ADMIN_BASE_URL + "/admin/login?token=" + signAdminToken("login", exp)
+    return client.replyMessage({
+      "replyToken": event.replyToken,
+      "messages": [{ "type": "text", "text": "ลิงก์เข้าสู่ระบบแอดมิน (ใช้ได้ 10 นาที):\n" + url }]
     })
   }
   return Promise.resolve(null)
