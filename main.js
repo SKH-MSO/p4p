@@ -581,11 +581,29 @@ for (const p of gatedPages) {
 // without making the physician re-enter their email/OTP. Registered before
 // the static mount below for the same reason as the gated pages.
 app.get(["/verify", "/verify/"], async (req, res) => {
-  if (!req.path.endsWith("/")) {
-    // Trailing "#" clears any stale LIFF session fragment carried over from
-    // the referring page — see the comment in servePage() above.
-    return res.redirect(302, "/verify/" + req.originalUrl.slice(req.path.length) + "#")
-  }
+  // NO trailing-slash redirect here — this page is served identically at both
+  // /verify and /verify/.
+  //
+  // Incident (2026-08): unbound physicians hit an endless /verify -> /verify/
+  // reload. This handler used to 302 the no-slash URL to "/verify/…#", and
+  // that explicit "#" was the bug: LIFF navigates to its registered Endpoint
+  // URL with "#access_token=…" appended to complete login, and the redirect
+  // replaced that fragment with an empty one. liff.init() then found no login
+  // state, restarted login, landed back on /verify, and got stripped again —
+  // forever. Vercel logs showed the cycle plainly, with no POST /line/bind
+  // ever reached.
+  //
+  // It only surfaced when the `openid` scope was added: that invalidated
+  // existing LIFF consent, so init() started needing a real login round-trip
+  // instead of restoring from cache. The stripping bug was already here.
+  //
+  // Serving both paths keeps the fragment intact (no navigation at all), and
+  // verify/index.html now loads /verify/app.js absolutely so the no-slash URL
+  // resolves its script correctly — that 404 was the redirect's only purpose.
+  //
+  // The OTHER trailing-"#" redirects (servePage, for /status /list /ranking)
+  // are deliberately untouched: those clear a genuinely stale fragment left by
+  // a DIFFERENT LIFF app, which is a real problem and a different one.
   res.setHeader("Content-Type", "text/html; charset=utf-8")
   if (req.query.reason !== "bind_required") {
     return res.send(verifyTemplate)
