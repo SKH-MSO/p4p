@@ -294,7 +294,11 @@ function extractNameFromText(text) {
     .replace(/ก\.ย\.?/g,   "กย")
     .replace(/ต\.ค\.?/g,   "ตค")
     .replace(/พ\.ย\.?/g,   "พย")
-    .replace(/ธ\.ค\.?/g,   "ธค");
+    .replace(/ธ\.ค\.?/g,   "ธค")
+    // Comma typed where the title's dot belongs — "," and "." sit on adjacent
+    // keys, so "นพ,สมชาย" / "พญ,แพร" are a frequent slip.  Runs after the month
+    // rules so "ม.ค." is already "มค" and cannot be mangled here.
+    .replace(/(นพ|พญ|ทพญ|ทพ|ดร)\s*,\s*/g, "$1.");
 
   // Pattern 1: run on titleNorm so title dots are intact but dotted variants
   // are already collapsed ("พ.ญ.ศาศวัต" → "พญ.ศาศวัต" → matched correctly).
@@ -310,11 +314,23 @@ function extractNameFromText(text) {
     return first; // single-token → will hit firstname-only Supabase lookup
   }
 
+  // Drop title prefixes before Pattern 2 so the dot-collapse below cannot weld
+  // one onto the firstname.  Two forms are stripped:
+  //   • known multi-char titles  — "นพ.สมชาย"        → "สมชาย"
+  //   • a bare one-letter prefix — "พ.แพร" / "พ,แพร" → "แพร"
+  // Without this the collapse turned a "พ.แพร จันทรรังสรรค์" subject line into
+  // "พแพร จันทรรังสรรค์", which matches no physician in the database.  Month
+  // abbreviations were already collapsed in titleNorm ("พ.ค." → "พค"), so no
+  // month token can be mistaken for a one-letter prefix here.
+  const deTitled = titleNorm
+    .replace(/(^|[\s(_\-–])(?:นพ|พญ|ทพญ|ทพ|ดร)\s*\.\s*/g, "$1")
+    .replace(/(^|[\s(_\-–])[฀-๿]\s*[.,]\s*(?=[฀-๿]{2,})/g, "$1");
+
   // Collapse dots between Thai characters only for Pattern 2 (month abbreviations).
   // Done AFTER Pattern 1 so title dots ("นพ.") are never destroyed.
   //   "มี.ค."  →  "มีค."  →  twoWordRe captures "มีค" → blocked by NON_NAME_THAI
   //   "เม.ย."  →  "เมย."
-  const text2 = text.replace(/([\u0E00-\u0E7F]+)\.(?=[\u0E00-\u0E7F])/g, "$1");
+  const text2 = deTitled.replace(/([\u0E00-\u0E7F]+)\.(?=[\u0E00-\u0E7F])/g, "$1");
 
   // Split compound เดือน<monthname> tokens so each part is checked individually.
   // เดือนมกราคม → เดือน มกราคม — both are in NON_NAME_THAI and get rejected below.
@@ -324,9 +340,11 @@ function extractNameFromText(text) {
   );
 
   // Pattern 2: two consecutive Thai-character sequences (min 2 chars each),
-  // separated by one of: space, underscore, dash, dot — but NOT a digit boundary.
+  // separated by one of: space, underscore, dash, dot, comma — but NOT a digit
+  // boundary.  Comma is included because senders type it where the dot or space
+  // belongs ("แพร,จันทรรังสรรค์"); without it such a pair never matched at all.
   // Both words must not be in the NON_NAME_THAI exclusion set.
-  const twoWordRe = /([\u0E00-\u0E7F]{2,})[\s_\-.]+([\u0E00-\u0E7F]{2,})/g;
+  const twoWordRe = /([\u0E00-\u0E7F]{2,})[\s_\-.,]+([\u0E00-\u0E7F]{2,})/g;
   let m2;
   let singleTokenFallback = null; // best firstname when no full pair is found
   while ((m2 = twoWordRe.exec(text3)) !== null) {
@@ -364,6 +382,23 @@ function extractNameFromText(text) {
  * Returns the first plausible name found, or null (caller falls back to sheet/Claude).
  */
 export function resolvePhysicianName(filename, subject, body) {
+  return resolvePhysicianNameCandidates(filename, subject, body)[0] ?? null;
+}
+
+/**
+ * Every distinct name the filename / subject / body yield, in that priority
+ * order.  resolvePhysicianName() returns the first one; callers that can verify
+ * a name against the database use the rest as fallbacks when the winner misses.
+ *
+ * The filename is scanned first because it is usually the cleanest source, but
+ * it is not always right — senders mistype it (a comma for the title's dot, a
+ * department word where the surname belongs) while the subject line spells the
+ * name out correctly.  Keeping the losing sources means one bad filename no
+ * longer costs the whole match.
+ *
+ * @returns {string[]} ordered, de-duplicated candidates (may be empty)
+ */
+export function resolvePhysicianNameCandidates(filename, subject, body) {
   // Strip file extension from filename before scanning
   const fileBase = (filename ?? "").replace(/\.[^.]+$/, "");
 
@@ -373,12 +408,13 @@ export function resolvePhysicianName(filename, subject, body) {
     body    ?? "",
   ];
 
+  const candidates = [];
   for (const src of sources) {
     const name = extractNameFromText(src);
-    if (name) return name;
+    if (name && !candidates.includes(name)) candidates.push(name);
   }
 
-  return null;
+  return candidates;
 }
 
 /**
