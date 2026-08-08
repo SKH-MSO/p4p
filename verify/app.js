@@ -281,7 +281,7 @@
         setTimeout(() => {
             emailInput.disabled = false
             emailLoadingDots.classList.add("hidden")
-        }, 6000)
+        }, 1500)
 
         // ── Physician name (request-access step) ────────────────────────────────
         // This used to be a <select> populated from list_all_physicians(), which
