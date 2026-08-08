@@ -302,7 +302,12 @@
          time LINE ships an update, since the hash would no longer match. -->
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <script src="/assets/shared.js"></script>
-    <script src="app.js"></script>
+    <!-- Absolute, NOT relative. This page is served at BOTH /verify and
+         /verify/ (see the handler in main.js — it no longer redirects between
+         them, because that redirect was destroying LIFF's login fragment).
+         A relative "app.js" would resolve to /app.js and 404 on the no-slash
+         URL, which is the only reason the redirect existed in the first place. -->
+    <script src="/verify/app.js"></script>
 </body>
 
 </html>
