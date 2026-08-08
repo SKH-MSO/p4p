@@ -7,21 +7,26 @@
     <title>SAKHONMSO P4P — Admin</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Work+Sans:wght@400;500;600&family=Noto+Sans+Thai+Looped:wght@100..900&display=swap"
         rel="stylesheet">
     <style>
         :root {
             --primary: #A68966;
+            --primary-dark: #8f7255;
             --secondary: #4B3D33;
             --tertiary: #F5F5F0;
             --neutral: #FAF9F6;
             --text: #2d2d2d;
             --text-muted: #6b6b6b;
             --muted: #9A8A7A;
-            --border: #d9d2c8;
+            --border: #e4ddd3;
             --danger: #c0392b;
+            --danger-soft: #fdecea;
             --ok: #2e7d32;
-            --radius: 4px;
+            --ok-soft: #e6f4ea;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --shadow: 0 1px 2px rgba(75, 61, 51, .04), 0 4px 16px rgba(75, 61, 51, .07);
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,25 +58,87 @@
         #header {
             position: sticky;
             top: 0;
-            z-index: 10;
-            background: var(--primary);
+            z-index: 20;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
             color: #fff;
-            padding: 14px 16px;
+            padding: 16px 18px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
-            box-shadow: 0 2px 8px rgba(75, 61, 51, 0.1);
+            box-shadow: 0 2px 12px rgba(75, 61, 51, .18);
         }
-        #header h1 { font-size: 1.05rem; font-weight: 700; }
+        #header h1 { font-size: 1.08rem; font-weight: 800; letter-spacing: .01em; }
         #logout-btn {
-            background: none; border: 1px solid rgba(255,255,255,.5); color: #fff;
-            border-radius: var(--radius); padding: 6px 10px; font-size: .8rem; cursor: pointer;
+            background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.3); color: #fff;
+            border-radius: 999px; padding: 7px 14px; font-size: .78rem; font-weight: 600; cursor: pointer;
+            transition: background .15s;
         }
+        #logout-btn:active { background: rgba(255,255,255,.28); }
+
+        /* Sticky filter bar */
+        #filter-bar {
+            position: sticky;
+            top: 56px;
+            z-index: 15;
+            background: rgba(250, 249, 246, .92);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #table_select {
+            width: 100%;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 9px 12px;
+            background: #fff;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--secondary);
+        }
+        .filter-row { display: flex; gap: 8px; }
+        .search-box {
+            flex: 1;
+            display: flex; align-items: center; gap: 6px;
+            background: #fff;
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 8px 14px;
+        }
+        .search-box svg { width: 15px; height: 15px; opacity: .4; flex-shrink: 0; }
+        #search_input {
+            border: none; outline: none; background: transparent;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.88rem; width: 100%; color: var(--text);
+        }
+        #search_input::placeholder { color: #b9ada0; }
+        #dept_filter {
+            border: 1.5px solid var(--border);
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: #fff;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            font-size: 0.82rem;
+            color: var(--secondary);
+            max-width: 40%;
+        }
+        #add-btn {
+            border: none; border-radius: var(--radius-sm);
+            padding: 9px 12px; font-size: 0.85rem; font-weight: 700; cursor: pointer;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            background: var(--secondary); color: #fff; white-space: nowrap;
+            display: flex; align-items: center; gap: 6px; justify-content: center;
+        }
+        #add-btn svg { width: 14px; height: 14px; }
 
         /* Spinner */
         #load {
-            width: 36px; height: 36px;
+            width: 32px; height: 32px;
             border: 3px solid var(--border);
             border-top-color: var(--primary);
             border-radius: 50%;
@@ -84,86 +151,133 @@
 
         /* Unauthorized */
         #unauthorized {
-            padding: 40px 24px;
+            padding: 48px 24px;
             text-align: center;
         }
         #unauthorized h2 {
             font-family: "Manrope", "Noto Sans Thai Looped", sans-serif;
-            font-size: 1.1rem; color: var(--secondary); margin-bottom: 10px;
+            font-size: 1.15rem; color: var(--secondary); margin-bottom: 10px; font-weight: 800;
         }
-        #unauthorized p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
+        #unauthorized p { color: var(--text-muted); font-size: .9rem; line-height: 1.7; }
         #unauthorized code {
-            display: inline-block; margin-top: 4px; padding: 3px 8px;
-            background: var(--tertiary); border-radius: var(--radius); color: var(--secondary);
+            display: inline-block; margin-top: 4px; padding: 3px 10px;
+            background: var(--tertiary); border-radius: 999px; color: var(--secondary); font-weight: 600;
         }
 
         /* Content */
-        #content { padding: 12px 12px 60px; }
+        #content { padding: 14px 14px 60px; }
 
-        #controls {
-            display: flex; gap: 8px; margin-bottom: 12px;
-        }
-        #table_select {
-            flex: 1;
-            border: 1.5px solid var(--border);
-            border-radius: var(--radius);
-            padding: 8px 10px;
-            background: var(--neutral);
-            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
-            font-size: 0.9rem;
-            color: var(--text);
-        }
-        #add-btn, .row-btn {
-            border: none; border-radius: var(--radius);
-            padding: 8px 12px; font-size: 0.85rem; cursor: pointer;
-            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
-        }
-        #add-btn { background: var(--primary); color: #fff; white-space: nowrap; }
+        #row-count { font-size: .78rem; color: var(--text-muted); margin: 2px 4px 10px; font-weight: 500; }
 
-        #row-count { font-size: .8rem; color: var(--text-muted); margin-bottom: 8px; }
-
-        /* Row cards (mobile-friendly instead of a wide table) */
+        /* Row cards */
         .row-card {
-            border: 1.5px solid var(--border);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
             background: #fff;
-            padding: 10px 12px;
+            box-shadow: var(--shadow);
             margin-bottom: 10px;
+            overflow: hidden;
+            transition: border-color .15s;
         }
         .row-card.editing { border-color: var(--primary); }
+
+        .row-card-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 13px 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .row-card-name {
+            flex: 1;
+            min-width: 0;
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .dept-badge {
+            flex-shrink: 0;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--primary-dark);
+            background: #f1e9df;
+            padding: 3px 10px;
+            border-radius: 999px;
+            max-width: 40%;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .chevron {
+            flex-shrink: 0;
+            width: 18px; height: 18px;
+            color: var(--muted);
+            transition: transform .2s ease;
+        }
+        .row-card.expanded .chevron { transform: rotate(180deg); }
+
+        .row-card-body {
+            display: none;
+            padding: 0 14px 14px;
+            border-top: 1px solid var(--tertiary);
+            padding-top: 10px;
+        }
+        .row-card.expanded .row-card-body { display: block; }
+
         .field-line {
-            display: flex; align-items: center; gap: 8px;
-            padding: 4px 0;
+            display: flex; align-items: center; gap: 10px;
+            padding: 5px 0;
         }
         .field-label {
-            width: 84px; flex-shrink: 0;
-            font-size: .75rem; color: var(--text-muted);
+            width: 88px; flex-shrink: 0;
+            font-size: .73rem; color: var(--text-muted); font-weight: 500;
         }
         .field-value { font-size: .92rem; word-break: break-word; }
-        .field-line input {
+        .field-line input,
+        .field-line select {
             flex: 1; min-width: 0;
             border: 1.5px solid var(--border);
-            border-radius: var(--radius);
-            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+            padding: 7px 10px;
             font-size: 0.88rem;
             font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            background: #fff;
+            color: var(--text);
         }
         .row-actions {
-            display: flex; gap: 8px; margin-top: 10px; justify-content: flex-end;
+            display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end;
         }
+        .row-btn {
+            border: none; border-radius: 999px;
+            padding: 8px 16px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+            font-family: "Work Sans", "Noto Sans Thai Looped", sans-serif;
+            transition: opacity .15s;
+        }
+        .row-btn:active { opacity: .75; }
         .btn-edit { background: var(--tertiary); color: var(--secondary); }
         .btn-save { background: var(--ok); color: #fff; }
         .btn-cancel { background: var(--tertiary); color: var(--text-muted); }
-        .btn-delete { background: var(--danger); color: #fff; }
+        .btn-delete { background: var(--danger-soft); color: var(--danger); }
 
         #new-row-card { display: none; }
 
-        #status_msg {
-            font-size: .82rem; text-align: center; padding: 8px; border-radius: var(--radius);
-            margin-bottom: 10px;
+        #empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+            font-size: .88rem;
         }
-        #status_msg.ok { background: #e6f4ea; color: var(--ok); }
-        #status_msg.error { background: #fdecea; color: var(--danger); }
+
+        #status_msg {
+            font-size: .82rem; text-align: center; padding: 9px; border-radius: var(--radius-sm);
+            margin-bottom: 10px; font-weight: 500;
+        }
+        #status_msg.ok { background: var(--ok-soft); color: var(--ok); }
+        #status_msg.error { background: var(--danger-soft); color: var(--danger); }
         #status_msg.hidden { display: none; }
     </style>
 </head>
@@ -190,15 +304,29 @@
             <h1>Roster Admin</h1>
             <button id="logout-btn" type="button">ออกจากระบบ</button>
         </div>
+        <div id="filter-bar">
+            <select id="table_select"></select>
+            <div class="filter-row">
+                <div class="search-box">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.3-4.3"></path>
+                    </svg>
+                    <input id="search_input" type="search" placeholder="ค้นหาชื่อ..." autocomplete="off">
+                </div>
+                <select id="dept_filter"></select>
+            </div>
+        </div>
         <div id="content">
             <div id="status_msg" class="hidden"></div>
-            <div id="controls">
-                <select id="table_select"></select>
-                <button id="add-btn" type="button">+ เพิ่มแถว</button>
-            </div>
             <div id="row-count"></div>
-            <div id="new-row-card" class="row-card editing"></div>
-            <div id="rows"></div>
+            <button id="add-btn" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+                เพิ่มแถวใหม่
+            </button>
+            <div id="new-row-card" class="row-card editing" style="margin-top:10px;"></div>
+            <div id="rows" style="margin-top:10px;"></div>
+            <div id="empty-state" class="hidden">ไม่พบข้อมูล</div>
         </div>
     </div>
 
