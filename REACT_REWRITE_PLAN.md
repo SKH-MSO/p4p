@@ -1,6 +1,6 @@
 # React Rewrite Plan — P4P LIFF Front End
 
-**Status:** Phase 0 implemented in [`web/`](web/). Phases 1–7 proposed.
+**Status:** Phases 0–4 implemented in [`web/`](web/). Phases 5–7 proposed.
 **Scope:** the four physician pages (`/verify/`, `/status/`, `/list/`, `/ranking/`), the
 **`/admin/` roster dashboard** (§1a), the shared browser helpers in `assets/`, and the HTTP
 surface of `main.js` (gate, session, admin API, webhooks).
@@ -86,10 +86,20 @@ These have incident history behind them (see the comment blocks in `main.js` and
 `verify/app.js`, and the `2026-08` notes). They are requirements, not implementation detail:
 
 1. **URL shapes.** `/status/`, `/list/`, `/ranking/` serve at the trailing-slash form, with a
-   302 from the bare path that appends a **literal `#`** — this clears a stale fragment left
-   by a *different* LIFF app. `/verify` and `/verify/` are both served directly with **no
-   redirect between them**, because that redirect destroyed LIFF's `#access_token=…` login
-   fragment and produced an infinite reload loop.
+   302 from the bare path that appends **a fragment of our own** — this stops LINE's iOS
+   webview carrying forward a stale fragment left by a *different* LIFF app. `/verify` and
+   `/verify/` are both served directly with **no redirect between them**, because that
+   redirect destroyed LIFF's `#access_token=…` login fragment and produced an infinite
+   reload loop.
+
+   **Implementation note (Phase 1).** The Express app used a bare `#`. Next will not emit
+   one: `NextResponse.redirect()` serialises through NextURL and drops an empty fragment;
+   a relative `Location` on a plain `Response` is rejected with `ERR_INVALID_URL`; and
+   absolutising it first still loses the fragment when Next re-normalises the header. All
+   three were measured against the emitted bytes, not assumed. The fragment is therefore
+   `#_` — inert (`liff.init()` looks for `access_token=`, which it does not contain), and
+   behaviourally identical in the webview. See `web/lib/gate/targets.ts`, which exists
+   purely so this is unit-testable.
 2. **Webhook and API paths.** `/line`, `/telegram/webhook`, `/auth/session`, `/line/bind`,
    plus the admin surface: `/admin/login`, `/admin/logout`, and
    `/admin/api/tables[/:table/{columns,rows[/:index]}]`. These are registered with LINE and

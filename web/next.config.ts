@@ -31,17 +31,15 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
 
-  // Every gated page carries a per-request access token and a per-request CSP
-  // nonce, so nothing here can be statically optimised or served from a CDN
-  // cache. Made explicit so a future "why is this not cached?" has an answer.
+  // Hands trailing-slash handling entirely to middleware.ts.
   //
-  // NOTE: this does not by itself force dynamic rendering — the pages declare
-  // that themselves. It only stops Next from trying to prerender at build time
-  // in a way that would bake in a placeholder token.
-  experimental: {
-    // Placeholder for Phase 1. Intentionally empty right now so the scaffold
-    // builds with stock behaviour and nothing is enabled without a reason.
-  },
+  // Next's built-in normalisation redirects one form to the other, and the two
+  // halves of this app need OPPOSITE behaviour: /status wants a redirect to
+  // /status/ WITH a literal "#" appended (to clear a stale fragment from
+  // another LIFF app), while /verify and /verify/ must both render with no
+  // redirect at all (a redirect destroys LIFF's login fragment). No single
+  // value of `trailingSlash` expresses that, so it is done by hand.
+  skipTrailingSlashRedirect: true,
 }
 
 export default nextConfig

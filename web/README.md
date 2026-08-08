@@ -28,19 +28,21 @@ wiring up `typescript-eslint` is worth doing but has not been done.
 
 | Phase | State |
 |---|---|
-| 0 — scaffold, tokens, shared lib, tests | **done** (this directory) |
-| 1 — gate, middleware, CSP nonce, webhooks | not started |
-| 1a — `/admin/` dashboard | not started — **unblocked, can start now** |
-| 2 — design system + `/status/` | not started |
-| 3 — `/list/` | not started |
-| 4 — `/ranking/` | not started |
-| 5 — `/verify/` | not started |
+| 0 — scaffold, tokens, shared lib, tests | **done** |
+| 1 — gate, middleware, CSP nonce, webhooks | **done** |
+| 1a — `/admin/` dashboard | **done** |
+| 2 — design system + `/status/` | **done** (design not yet signed off) |
+| 3 — `/list/` | **done** |
+| 4 — `/ranking/` | **done** |
+| 5 — `/verify/` | not started — placeholder page only |
 | 6 — cutover | not started |
 | 7 — decommission Express | not started |
 
-Phase 1a is the only page that needs neither a staging LIFF app nor the redesign sign-off —
-`/admin/` uses no LIFF and runs in a plain mobile browser. It can proceed while both blockers
-below are outstanding. See plan §1a.
+**Nothing is deployed.** Production is still Express from the repo root.
+
+`/verify/` is a placeholder that renders a "Phase 5" notice. It exists because the gate
+redirects there, so without it the redirect chain could not be tested end to end. Until it is
+built, this app cannot log anybody in — which is fine, because it is not serving anyone.
 
 ### Blocked on someone with LINE Developers console access
 
@@ -65,16 +67,22 @@ Suggested gate: one annotated `/status/` screen. See plan §4.
 ## What is here
 
 ```
+middleware.ts          the gate: canonicalisation, session, CSP nonce
 app/
   layout.tsx           html lang="th", self-hosted fonts, viewport
-  globals.css          design tokens from ../design.md — one definition, not four
-  page.tsx             placeholder root, replaced in Phases 2–5
+  globals.css          design tokens from ../design.md — one definition, not five
+  status/ list/ ranking/   the three physician pages
+  admin/               roster CRUD + its six API route handlers
+  verify/              PLACEHOLDER — Phase 5
+  auth/ line/ telegram/    session, LINE bind, LINE bot, Telegram webhooks
   preflight/           Phase 0 diagnostic page (delete in Phase 7)
+components/            DesktopBlock, StateBox, Spinner, BackToTop, Notice
 lib/
-  months.ts            BE conversion, month keys, month windows, deadlines, Bangkok time
-  colors.ts            month accent colours
-  departments.ts       department order, labels, name joining
-  __tests__/           42 tests, including the parity guard below
+  gate/                cookies, JWT claims, token refresh, gate decision, redirect targets
+  admin/               HMAC tokens, service-role roster access, form-field typing
+  line/                LIFF ID-token verification, Flex month picker
+  months.ts colors.ts departments.ts pagination.ts
+  __tests__/           108 tests, including the parity guard below
 ```
 
 ### The parity guard
@@ -97,13 +105,20 @@ page then fails to group.
 If that test fails, the fix is to change all three, not to loosen the test. Delete the file
 in Phase 7 along with the legacy sources.
 
-## Findings from building the scaffold
+## Findings
 
-**Next.js emits inline `<script>` tags.** Verified against the build output: every page has
-two, with no `src` and no nonce. The current app's CSP has *no* `unsafe-inline` on
-`script-src` — a deliberate property earned by moving all page JS to external files. So a
-naive migration would silently weaken it. The per-request nonce described in plan §6 is a
-Phase 1 requirement, not cleanup.
+**Next.js emits inline `<script>` tags**, two per page, with no `src`. The current app's CSP
+has *no* `unsafe-inline` on `script-src` — a deliberate property earned by moving all page JS
+to external files — so a naive migration would silently weaken it. Fixed with the
+per-request nonce in `middleware.ts`; verified against a running server that both inline
+scripts carry it and the header is
+`script-src 'self' 'nonce-…'` with no `unsafe-inline`.
+
+**Next will not emit a bare `#` in a `Location` header**, which the Express gate relied on to
+stop LINE's webview carrying a stale LIFF fragment forward. Three approaches were measured
+and all three dropped it (see the header comment in `lib/gate/targets.ts`). The fragment is
+now `#_` — inert and behaviourally identical. This is the kind of thing that would have
+shipped silently and resurfaced as the 2026-08 redirect loop, so it has its own test file.
 
 **`next/font` works and removes two CSP origins.** Manrope, Work Sans and Noto Sans Thai
 Looped are downloaded at build time and served from our own origin, so
